@@ -6,11 +6,11 @@
   "author": "JAYTDD <363807870@qq.com>",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/lunesnow/dsh-token-usage-panel.git"
+    "url": "git+https://github.com/JAYTDD/dsh-token-usage-panel.git"
   },
-  "homepage": "https://github.com/lunesnow/dsh-token-usage-panel#readme",
+  "homepage": "https://github.com/JAYTDD/dsh-token-usage-panel#readme",
   "bugs": {
-    "url": "https://github.com/lunesnow/dsh-token-usage-panel/issues"
+    "url": "https://github.com/JAYTDD/dsh-token-usage-panel/issues"
   },
   "publishConfig": {
     "registry": "https://registry.npmjs.org"
