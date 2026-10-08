@@ -1,0 +1,21 @@
+# Backup / scratch files created while iterating (activation probes are written
+# and deleted ad hoc; keep them out of the baseline).
+# NOTE: never write files in this tree with PowerShell Set-Content (it re-encodes
+# by the system code page).
+*.bak
+*~
+
+# OS noise.
+.DS_Store
+Thumbs.db
+
+# Zero runtime/build dependencies by design, so this should never appear; ignore
+# it so an accidental `npm i` stays invisible.
+node_modules/
+
+# Session scratch: agent-team state (a created team cannot be torn down), audit
+# dry-run temp, and the editor's own ignore file. Never part of the plugin.
+.agent-teams/
+.audit-tmp/
+.superpowers/
+.zcodeignore

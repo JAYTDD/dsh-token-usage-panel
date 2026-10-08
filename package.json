@@ -1,0 +1,64 @@
+{
+  "name": "dsh-token-usage-panel",
+  "version": "1.0.0",
+  "description": "Token 用量面板 / Token usage panel: 侧边栏入口，概览（活动热力图、每日趋势、模型环图）与会话明细（筛选、排序、导出）。零依赖、无金额、无定价。",
+  "type": "module",
+  "author": "JAYTDD <363807870@qq.com>",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/lunesnow/dsh-token-usage-panel.git"
+  },
+  "homepage": "https://github.com/lunesnow/dsh-token-usage-panel#readme",
+  "bugs": {
+    "url": "https://github.com/lunesnow/dsh-token-usage-panel/issues"
+  },
+  "publishConfig": {
+    "registry": "https://registry.npmjs.org"
+  },
+  "main": "lib/index.js",
+  "exports": {
+    ".": {
+      "default": "./lib/index.js"
+    },
+    "./client": {
+      "default": "./lib/client.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "lib/index.js",
+    "lib/route-usage.js",
+    "lib/route-names.js",
+    "lib/client.js",
+    "cordis.patch.yml",
+    "README.md",
+    "LICENSE"
+  ],
+  "keywords": [
+    "dsh-plugin",
+    "deepseek-harness",
+    "deepseek",
+    "dsh",
+    "token",
+    "usage",
+    "analytics",
+    "panel",
+    "sidebar"
+  ],
+  "license": "MIT",
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "inject": [
+        "@deepseek-ai/dsh-api-session-controller",
+        "@deepseek-ai/dsh-client-locale",
+        "@deepseek-ai/dsh-client-ui-layout",
+        "@deepseek-ai/dsh-client-ui-sidebar",
+        "@deepseek-ai/dsh-client-ui-workspace"
+      ],
+      "platform": "web"
+    }
+  }
+}

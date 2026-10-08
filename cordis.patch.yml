@@ -1,0 +1,51 @@
+# Bundle layer applied when a profile lists this package. The row names the
+# package by name so Node resolution finds the installed code.
+#
+# The plugin has two halves:
+#
+#   Host (lib/index.js + lib/route-usage.js + lib/route-names.js)
+#     Registers three usage-derived session projection units:
+#       tokenUsageByRoute        per-model totals (all time)
+#       tokenUsageByDay          per-day totals, last 366 days
+#       tokenUsageByRouteByDay   per-day-per-model detail, last 31 days
+#     They partition the same tokens `dsh-token-meter` already folds into
+#     `tokenUsage`, sharing one event-advance step so the replace-within-a-step
+#     rule and the `llm/retry-started` boundary exist in exactly one place.
+#     Because each unit carries a `wire` block it becomes client-visible through
+#     the existing read model (session-listing projection column,
+#     `session.projections`, control stream, projection cache) with no new
+#     service, Remote namespace, or descriptor.
+#
+#     Route labels are the two names the LLM registry actually supplies: the
+#     provider's display name (`llm.listProviders()`) and the model's display name
+#     (`llm.listModels()`). A route therefore reads
+#     `opencode go chat · deepseek-v4.1-flash`. There is NO vendor label: an event
+#     records only `provider/model`, and `provider` is a route key — on a real
+#     profile the same models arrive as `opencodegochat/*`, `opencodego/*` and
+#     `codexpert/*`, i.e. gateways in front of someone else's models — so any
+#     vendor name would be a guess rendered as a fact.
+#
+#     Both the projection registry and the LLM registry are INJECTED rather than
+#     declared as dependencies: a composition without either still loads this
+#     entry and simply contributes less.
+#
+#   Client (lib/client.js, generated from src/)
+#     Registers one `sidebar.panellist` icon row (the sidebar entry) plus one
+#     keyed `main` panel under the same id, offering an overview view (KPI strip,
+#     activity calendar, daily trend, model donut) and a sessions view (totals,
+#     per-model breakdown, filterable virtualised table).
+#
+# There is NO pricing configuration: money was removed from this plugin. The
+# breakdown is about usage, not billing.
+#
+# Configuration (all optional):
+#
+#   config:
+#     utcOffsetMinutes: 480
+#       Minutes east of UTC used to bucket usage into days. Defaults to this
+#       process's offset, which is the user's zone because the Host runs on the
+#       user's machine. Explicit because a projection must be deterministic and a
+#       timezone is not recoverable from the session log.
+- insert:
+    - id: dsh-token-usage-panel
+      name: 'dsh-token-usage-panel'
