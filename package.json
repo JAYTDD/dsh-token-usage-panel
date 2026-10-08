@@ -1,6 +1,6 @@
 {
   "name": "dsh-token-usage-panel",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Token 用量面板 / Token usage panel: 侧边栏入口，概览（活动热力图、每日趋势、模型环图）与会话明细（筛选、排序、导出）。零依赖、无金额、无定价。",
   "type": "module",
   "author": "JAYTDD <363807870@qq.com>",
