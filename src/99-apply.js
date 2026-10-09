@@ -1,5 +1,5 @@
 /** Services this client half needs before it can register its slots. */
-const inject = ["slots", "locale", "sessions", "uiWorkspace"];
+const inject = ["slots", "locale", "sessions", "uiWorkspace", "workspaces"];
 
 /**
  * Register the sidebar entry and its main panel.
@@ -13,6 +13,14 @@ function apply(ctx) {
 	const openSession = (id) => {
 		ctx.uiWorkspace.openSession(id);
 	};
+	/**
+	 * Whether the registry hides a session from every grouping surface.
+	 *
+	 * `openSession` still selects it, but the sidebar tree never lists an archived
+	 * session, so the main view resolves to the New Session page instead. The panel
+	 * asks before navigating, because only the archive set knows the difference.
+	 */
+	const isSessionArchived = (id) => ctx.workspaces.list.getSnapshot().archivedSessionIds.includes(id);
 	const startSession = (workspaceId) => {
 		ctx.uiWorkspace.startSession(workspaceId);
 	};
@@ -24,6 +32,7 @@ function apply(ctx) {
 				locale: NS,
 				inject: () => ({
 					openSession,
+					isSessionArchived,
 					startSession,
 					sessionList: ctx.sessions.list,
 					sessionService: ctx.sessions,

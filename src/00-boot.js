@@ -23,6 +23,7 @@ const {
 	IconWarningOutlineRegular,
 	Input,
 	Menu,
+	Modal,
 	SegmentedControl,
 	StateDot,
 	Tag,

@@ -31,6 +31,7 @@ function TokenUsagePanel(props) {
 	const [filters, setFiltersState] = react.useState(loadFilters);
 	const [animate, setAnimate] = react.useState(true);
 	const [copied, setCopied] = react.useState(false);
+	const [archivedId, setArchivedId] = react.useState(undefined);
 	const [focusId, setFocusId] = react.useState(undefined);
 	const [windowInfo, setWindowInfo] = react.useState(null);
 	const [page, setPage] = react.useState(1);
@@ -244,6 +245,13 @@ function TokenUsagePanel(props) {
 
 	const openSession = react.useCallback(
 		(id) => {
+			// An archived session is not listed by the sidebar tree, so opening it lands
+			// on the New Session page instead of the conversation the reader clicked.
+			// Say so rather than navigate into that dead end.
+			if (props.isSessionArchived(id)) {
+				setArchivedId(id);
+				return;
+			}
 			try {
 				props.openSession(id);
 			} catch (error) {
@@ -253,11 +261,12 @@ function TokenUsagePanel(props) {
 				announce(t("openFailed"));
 			}
 		},
-		[props.openSession, announce, t],
+		[props.openSession, props.isSessionArchived, announce, t],
 	);
 
 	const onWindowChange = react.useCallback((info) => setWindowInfo(info), []);
 	const onFocusHandled = react.useCallback(() => setFocusId(undefined), []);
+	const onArchivedClosed = react.useCallback(() => setArchivedId(undefined), []);
 	/**
 	 * Turn to the page that holds a pending focus row.
 	 *
@@ -613,6 +622,18 @@ function TokenUsagePanel(props) {
 			filterBar,
 			body,
 			footer,
+			// The archived-session notice: the answer to the click the reader just made,
+			// so it is a dialog they dismiss rather than a toast that expires. The
+			// platform's own Modal owns the backdrop, the focus trap and Escape.
+			h(Modal, {
+				key: "archived",
+				open: archivedId !== undefined,
+				onClose: onArchivedClosed,
+				title: t("archivedTitle"),
+				closeLabel: t("archivedClose"),
+				description: t("archivedBody"),
+				footer: h(Button, { variant: "primary", onClick: onArchivedClosed }, t("archivedClose")),
+			}),
 		],
 	);
 }

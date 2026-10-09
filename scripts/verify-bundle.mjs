@@ -234,6 +234,16 @@ const primitivesStub = {
       h('input', { type: 'checkbox', checked, disabled, onChange: (event) => onChange(event.target.checked) }),
       h('span', null, label),
     ]),
+  Modal: ({ open, title, description, closeLabel, children, footer }) =>
+    open
+      ? h('div', { role: 'dialog', 'aria-modal': 'true', 'aria-label': title }, [
+          h('h2', null, title),
+          h('button', { type: 'button', 'aria-label': closeLabel }),
+          description === undefined ? null : h('p', null, description),
+          children ?? null,
+          footer ?? null,
+        ])
+      : null,
   Menu: ({ open, anchor, items = [], children, selectedId, selectedIds, onSelect, className }) =>
     h('span', { className }, [
       anchor,
@@ -358,7 +368,10 @@ const mod = entry.factory((request) => {
   throw new Error('unexpected require: ' + request)
 })
 check(cssTags.length === 1, 'materializing the factory injects exactly one style tag')
-check(mod.inject.join(',') === 'slots,locale,sessions,uiWorkspace', 'inject names the four required services (' + mod.inject.join(',') + ')')
+check(
+  mod.inject.join(',') === 'slots,locale,sessions,uiWorkspace,workspaces',
+  'inject names the five required services (' + mod.inject.join(',') + ')',
+)
 
 console.log('# layout and motion contract')
 const css = cssTags[0].textContent
@@ -610,6 +623,12 @@ const seedBlock = (id) => {
     projectionsBySession: { ...current.projectionsBySession, [id]: { values: seeded, state: 'ready' } },
   })
 }
+/**
+ * The registry-global archive set the `workspaces` service publishes. It is a
+ * live read, not a render input: the panel only asks on a row click, so mutating
+ * this array between clicks is exactly what the real service does on archive.
+ */
+const archivedIds = []
 const ctx = {
   effect: (fn) => fn(),
   locale: { register: () => () => undefined, subscribe: () => () => undefined, bind: () => (key) => key },
@@ -633,6 +652,7 @@ const ctx = {
       return Promise.resolve()
     },
   },
+  workspaces: { list: { getSnapshot: () => ({ archivedSessionIds: archivedIds }) } },
   uiWorkspace: { openSession: (id) => opened.push(id), startSession: (workspaceId) => started.push(workspaceId) },
 }
 mod.apply(ctx)
