@@ -39,6 +39,26 @@ function formatFullTime(value) {
 }
 
 /**
+ * A share of a total, as a percentage.
+ *
+ * A real but tiny share must not print as `0.0%`: a route that spent anything at
+ * all is not nothing, and rounding it to zero hides the row it belongs to. The
+ * precision therefore widens as the value shrinks, and below the smallest step the
+ * string says so rather than claiming a value it cannot show. Trailing zeros are
+ * dropped so the column does not read as a wall of `.0`.
+ *
+ * @param value - the ratio (0.338 for 33.8%), not the percentage.
+ * @returns the percentage string.
+ */
+function formatShare(value) {
+	const percent = Number.isFinite(value) ? Math.max(0, value) * 100 : 0;
+	if (percent <= 0) return "0%";
+	if (percent < 0.01) return "<0.01%";
+	const text = percent.toFixed(percent >= 1 ? 1 : 2);
+	return (text.indexOf(".") === -1 ? text : text.replace(/\.?0+$/, "")) + "%";
+}
+
+/**
  * The local date a Host day index names.
  *
  * The Host buckets by its own UTC offset and ships that offset with the data, so

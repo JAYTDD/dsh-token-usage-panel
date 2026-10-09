@@ -617,7 +617,7 @@ function ModelDonut({ routes, t, onSelect, extra }) {
 									]),
 									h("span", { key: "v", className: "dshTup_modelMeta" }, formatInt(totalOf(segment.route.tokens)) + " " + t("unit.tokens")),
 								]),
-								h("span", { key: "p", className: "dshTup_modelShare" }, (segment.share * 100).toFixed(1) + "%"),
+								h("span", { key: "p", className: "dshTup_modelShare" }, formatShare(segment.share)),
 							],
 						),
 					),

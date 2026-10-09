@@ -474,7 +474,7 @@ function ModelBreakdown({ breakdown, onSelect, t }) {
 	const [grouping, setGrouping] = react.useState("provider");
 	if (breakdown === undefined) return null;
 	const total = breakdown.routes.reduce((sum, route) => sum + totalOf(route.tokens), 0);
-	const shareOf = (value) => (total > 0 ? (value / total) * 100 : 0).toFixed(1) + "%";
+	const shareOf = (value) => formatShare(total > 0 ? value / total : 0);
 	const chip = (route) =>
 		h(
 			"li",

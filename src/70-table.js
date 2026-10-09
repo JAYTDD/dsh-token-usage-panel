@@ -88,7 +88,7 @@ function usageCell(column, context) {
 					{ key: "track", className: "dshTup_shareTrack" },
 					h("div", { className: "dshTup_shareFill", style: { width: Math.max(ratio > 0 ? 2 : 0, ratio * 100) + "%" } }),
 				),
-				h("span", { key: "num", className: "dshTup_shareNum" }, filteredTotal > 0 ? (ratio * 100).toFixed(1) + "%" : t("never")),
+				h("span", { key: "num", className: "dshTup_shareNum" }, filteredTotal > 0 ? formatShare(ratio) : t("never")),
 			]),
 		]);
 	}
