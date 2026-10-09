@@ -64,15 +64,12 @@ const css = [
 	// the tooltip chrome. Chart cards therefore keep the resting surface and signal
 	// the hover on the border alone.
 	".dshTup_chartCard:hover{background:var(--dsw-alias-bg-layer-1)}",
-	// Inside the sessions scrollport the cards take their natural height
-	// (`flex:none`), so card content can never be squeezed and the page scrolls
-	// instead.
-	".dshTup_sessions>.dshTup_summary,.dshTup_sessions>.dshTup_routes,.dshTup_sessions>.dshTup_chartCard{flex:none}",
-	// The chart card is the only `.dshTup_card` placed straight into that flow, and
-	// `.dshTup_card` carries no margin of its own (the overview's cards are inset by
-	// `.dshTup_overview`'s padding). Without this inset it renders full-bleed: wider
-	// than the flat bands above it, and clipped at the panel edges.
-	".dshTup_sessions>.dshTup_chartCard{margin:var(--dsh-tup-sp-3) var(--dsh-tup-sp-5) 0}",
+	// Inside the sessions scrollport the bands keep their natural height, so no band
+	// can squeeze another and the page scrolls instead. Their width comes from the
+	// wide-layout region at the end of the sheet — a child selector written here would
+	// contain `.dshTup_summary{`, and the self-check reads the first rule carrying a
+	// band's selector.
+	".dshTup_sessions>.dshTup_chartCard{flex:1 1 100%;margin:var(--dsh-tup-sp-3) 0 0}",
 	// Padding-top matches .dshTup_overview so the title does not jump 4px when the
 	// view switches between overview and sessions.
 	".dshTup_head{flex:0 0 auto;display:flex;align-items:flex-start;gap:var(--dsh-tup-sp-3);flex-wrap:wrap;padding:var(--dsh-tup-sp-3) var(--dsh-tup-sp-5) 0}",
@@ -87,7 +84,7 @@ const css = [
 	// A flat band: no border, no fill, no radius. It is separated from what follows by
 	// one hairline and from what precedes it by the view's own gap, so the page reads
 	// as one surface instead of a column of boxes.
-	".dshTup_summary{flex:0 0 auto;display:flex;align-items:center;gap:var(--dsh-tup-sp-4) var(--dsh-tup-sp-5);flex-wrap:wrap;margin:var(--dsh-tup-sp-3) var(--dsh-tup-sp-5) 0;padding-bottom:var(--dsh-tup-sp-4);border-bottom:var(--dsh-tup-hairline) solid var(--dsw-alias-border-l3)}",
+	".dshTup_summary{flex:0 0 auto;display:flex;align-items:center;gap:var(--dsh-tup-sp-4) var(--dsh-tup-sp-5);flex-wrap:wrap;margin:var(--dsh-tup-sp-3) 0 0;padding-bottom:var(--dsh-tup-sp-4);border-bottom:var(--dsh-tup-hairline) solid var(--dsw-alias-border-l3)}",
 	".dshTup_sumHead{display:flex;flex-direction:column;gap:1px;flex:none;min-width:148px}",
 	".dshTup_sumLabel{color:var(--dsw-alias-label-secondary);font-size:var(--dsh-tup-fs-sm)}",
 	".dshTup_sumValue{font-size:var(--dsh-tup-fs-2xl);font-weight:600;font-variant-numeric:tabular-nums;line-height:1.25;overflow-wrap:anywhere}",
@@ -115,7 +112,7 @@ const css = [
 	//#region per-model breakdown
 	// The second flat band: same treatment as the summary, so the two read as sections
 	// of one page.
-	".dshTup_routes{flex:0 0 auto;display:flex;flex-direction:column;gap:var(--dsh-tup-sp-2);margin:var(--dsh-tup-sp-3) var(--dsh-tup-sp-5) 0;padding-bottom:var(--dsh-tup-sp-4);border-bottom:var(--dsh-tup-hairline) solid var(--dsw-alias-border-l3)}",
+	".dshTup_routes{flex:0 0 auto;display:flex;flex-direction:column;gap:var(--dsh-tup-sp-2);margin:var(--dsh-tup-sp-3) 0 0;padding-bottom:var(--dsh-tup-sp-4);border-bottom:var(--dsh-tup-hairline) solid var(--dsw-alias-border-l3)}",
 	".dshTup_routeHead{display:flex;align-items:baseline;justify-content:space-between;gap:var(--dsh-tup-sp-3);flex-wrap:wrap}",
 	".dshTup_routeList{display:flex;flex-wrap:wrap;gap:var(--dsh-tup-sp-2) var(--dsh-tup-sp-3);margin:0;padding:0;list-style:none}",
 	// The chip sits on `bg-layer-1` rather than the page base: it has to read as a
@@ -154,7 +151,7 @@ const css = [
 	// view. The table keeps its own inner scroller (the virtual window needs a
 	// definite `clientHeight`), so a tall table scrolls inside the page scroll
 	// rather than growing without bound.
-	".dshTup_sessions{flex:1 1 auto;display:flex;flex-direction:column;min-height:0;overflow-y:auto;overscroll-behavior:contain}",
+	".dshTup_sessions{flex:1 1 auto;display:flex;flex-direction:row;flex-wrap:wrap;align-content:flex-start;min-height:0;overflow-y:auto;overscroll-behavior:contain;padding:0 var(--dsh-tup-sp-5)}",
 	// The KPI strip is a flat band too: four figures separated by hairlines, closed by
 	// one rule under the row. It is the first thing in the overview, so it needs no
 	// rule above it.
@@ -260,7 +257,7 @@ const css = [
 	// Only the ::-webkit-scrollbar family is declared: the host is Chromium, where
 	// those pseudo-elements take precedence over scrollbar-width/scrollbar-color, so
 	// declaring both would leave the standard properties silently dead.
-	".dshTup_tableWrap{flex:0 0 auto;margin:var(--dsh-tup-sp-3) var(--dsh-tup-sp-5) 0}",
+	".dshTup_tableWrap{flex:0 0 auto;margin:var(--dsh-tup-sp-3) 0 0}",
 	".dshTup_tableScroll{overflow-x:auto;overscroll-behavior-x:contain;border:var(--dsh-tup-hairline) solid var(--dsw-alias-border-l3);border-radius:var(--dsw-radius-lg);background:var(--dsw-alias-bg-layer-1)}",
 	".dshTup_tableWrap[data-scrolled=true] .dshTup_tableScroll{border-color:var(--dsw-alias-border-l2)}",
 	".dshTup_root[data-animate=true] .dshTup_tableScroll{transition:border-color var(--dsh-tup-base) var(--dsh-tup-ease)}",
@@ -333,6 +330,50 @@ const css = [
 	".dshTup_footSpacer{flex:1 1 0;min-width:0}",
 	".dshTup_pagination{display:inline-flex;align-items:center;gap:var(--dsh-tup-sp-2)}",
 	".dshTup_notice{display:inline-flex;align-items:center;gap:var(--dsh-tup-sp-1);color:var(--dsw-alias-state-warn-primary)}",
+	//#endregion
+
+	//#region wide layout
+	// Above a comfortable pane width the overview becomes two columns: the two
+	// time-series views (activity calendar, daily trend) on the left, the model panel
+	// on the right spanning both rows. Pairing the trend and the ring on one line —
+	// each on half the pane — left a void, because the route legend is by far the
+	// tallest thing on the page: as one column of 28 routes it is several times the
+	// height of a chart, so the grid stretched both cards to the legend's height and
+	// the trend card sat half empty. Giving the legend its own column is the fix; it
+	// scrolls inside that column instead of setting the height of the page.
+	//
+	// The threshold is set by the trend chart, not by taste: its floor is 520px and a
+	// card adds 32px of padding, so the left column needs 552px — with the overview's
+	// 20px gutters and the 12px gap, the split starts at about 960px of pane.
+	//
+	// The three chart cards are indistinguishable by class, so `:has()` has to name
+	// them. Below the threshold everything stays a single stacked column, which is
+	// what a narrow pane can actually hold.
+	"@container (min-width: 960px){.dshTup_overview{display:grid;grid-template-columns:minmax(0,1.7fr) minmax(0,1fr);align-items:stretch;gap:var(--dsh-tup-sp-3)}.dshTup_overview>*{min-width:0}.dshTup_overview>.dshTup_kpi{grid-column:1/-1;grid-row:1}.dshTup_overview>.dshTup_card:has(.dshTup_heatmapWrap){grid-column:1;grid-row:2}.dshTup_overview>.dshTup_card:has(.dshTup_trendWrap){grid-column:1;grid-row:3}.dshTup_overview>.dshTup_card:has(.dshTup_donutWrap){grid-column:2;grid-row:2/4;display:flex;flex-direction:column;min-height:0}.dshTup_overview>.dshTup_card:has(.dshTup_donutWrap) .dshTup_donutWrap{flex:1 1 auto;min-height:0;flex-direction:column;flex-wrap:nowrap;align-items:stretch}.dshTup_overview>.dshTup_card:has(.dshTup_donutWrap) .dshTup_donut{align-self:center}.dshTup_overview>.dshTup_card:has(.dshTup_donutWrap) .dshTup_modelList{min-height:0;max-height:min(320px,34vh);overflow-y:auto;overscroll-behavior:contain}}",
+	// The sessions view has one honest arrangement, so it does not change with the
+	// overview's composition: totals band, then the model breakdown with its gateway
+	// groups flowing as columns (ten gateways become three rows, not ten), then the
+	// table full width. Pairing the short totals band beside the tall breakdown band
+	// is what produced the void there, so nothing is paired. `flex:1 0 100%` is
+	// deliberate — a bare `flex:1 1 100%` lets flex-shrink pull the bands back onto
+	// one line, and the bundle rules that set their bases are more specific than a
+	// `>*` reset, so they are named.
+	".dshTup_sessions>*{min-width:0}",
+	".dshTup_sessions>.dshTup_summary,.dshTup_sessions>.dshTup_routes,.dshTup_sessions>.dshTup_tableWrap,.dshTup_sessions>.dshTup_chartCard{flex:1 0 100%}",
+	".dshTup_sessions>.dshTup_routes .dshTup_routeGroups{flex-direction:row;flex-wrap:wrap;gap:var(--dsh-tup-sp-3) var(--dsh-tup-sp-5)}",
+	".dshTup_sessions>.dshTup_routes .dshTup_routeGroup{flex:1 1 300px}",
+	// The filter band stacks two rows because that is the only honest arrangement on a
+	// narrow pane. Once the pane is wide enough for every control to share one line,
+	// `display:contents` dissolves the two row boxes so their children become flex
+	// items of the band itself and flow as a single wrapped toolbar. The threshold is
+	// all-or-nothing on purpose: below it the band keeps its two tidy rows rather than
+	// half-merging, which strands the reset button at the end of the second row.
+	// 1280px is where the toolbar genuinely fits on one line; at a 1140px pane it
+	// wrapped into a worse arrangement than the two rows it replaced.
+	//
+	// The spacer is dropped (its whole job was to push the reset button right) and the
+	// reset button is ordered last instead, so it stays the trailing control.
+	"@container (min-width: 1280px){.dshTup_filters{flex-direction:row;flex-wrap:wrap;align-items:center}.dshTup_filterRow{display:contents}.dshTup_filterSpacer{display:none}.dshTup_filterRow:first-child>:last-child{order:1}.dshTup_root .dshTup_search{flex:0 1 320px}}",
 	//#endregion
 
 	//#region responsive columns
