@@ -1,13 +1,18 @@
 /**
  * The plugin stylesheet.
  *
+ * One page, not a stack of boxes. The panel is a continuous data surface: the KPI
+ * strip, the session summary and the per-model breakdown are flat bands separated
+ * by hairlines and whitespace, and only the things that are genuinely a container
+ * — the chart cards and the table — carry a bordered surface. Hierarchy comes from
+ * the type scale and the spacing scale below; colour is spent on two things only,
+ * the data series and a single interaction accent.
+ *
  * Layout contract (guarded by a static assertion in the self-check): the frame's
- * centre column is `display:flex; overflow:hidden` with a definite height, so
- * this panel is a flex column of that same height. Every band except the table is
- * `flex:0 0 auto`; the table region is the ONE `flex:1 1 auto; min-height:<floor>;
- * overflow:auto` child and therefore the only scrollport. A shrinking
- * `overflow:hidden` table wrapper was absorbing all the shrink and clipping rows
- * instead of producing a scrollbar.
+ * centre column is `display:flex; overflow:hidden` with a definite height, so this
+ * panel is a flex column of that same height. Every band except the scrolling view
+ * is `flex:0 0 auto`; each view is its own scrollport and the table band takes its
+ * natural height inside it.
  *
  * Motion contract: the root carries `data-animate="true"` plus the `--dsh-tup-*`
  * tokens built from `MOTION` in `05-constants.js`, and every entrance, growth and
@@ -18,7 +23,10 @@
  */
 const css = [
 	//#region shell and bands
-	".dshTup_root{height:100%;min-height:0;box-sizing:border-box;display:flex;flex-direction:column;overflow:hidden;container-type:inline-size;background:var(--dsw-alias-bg-base);color:var(--dsw-alias-label-primary);font-size:14px;line-height:1.5;--dsh-tup-row-h:54px;--dsh-tup-fast:140ms;--dsh-tup-base:220ms;--dsh-tup-slow:460ms;--dsh-tup-stagger:16ms;--dsh-tup-ease:cubic-bezier(.22,.61,.36,1);--dsh-tup-settle:cubic-bezier(.16,1,.3,1)}",
+	// The type and spacing scales live here, so a size is changed in one place. The
+	// motion tokens are repeated from `MOTION` only as the fallback for a stylesheet
+	// rendered without the panel's inline properties.
+	".dshTup_root{height:100%;min-height:0;box-sizing:border-box;display:flex;flex-direction:column;overflow:hidden;container-type:inline-size;background:var(--dsw-alias-bg-base);color:var(--dsw-alias-label-primary);font-size:var(--dsh-tup-fs-base);line-height:1.5;--dsh-tup-row-h:54px;--dsh-tup-hairline:.5px;--dsh-tup-fs-base:14px;--dsh-tup-fs-2xs:10px;--dsh-tup-fs-xs:11px;--dsh-tup-fs-sm:12px;--dsh-tup-fs-md:13px;--dsh-tup-fs-lg:17px;--dsh-tup-fs-xl:20px;--dsh-tup-fs-2xl:24px;--dsh-tup-sp-1:4px;--dsh-tup-sp-2:8px;--dsh-tup-sp-3:12px;--dsh-tup-sp-4:16px;--dsh-tup-sp-5:20px;--dsh-tup-sp-6:24px;--dsh-tup-fast:140ms;--dsh-tup-base:220ms;--dsh-tup-slow:460ms;--dsh-tup-stagger:16ms;--dsh-tup-ease:cubic-bezier(.22,.61,.36,1);--dsh-tup-settle:cubic-bezier(.16,1,.3,1)}",
 	// The motion vocabulary. Every wave — bands, table rows, heatmap columns — is
 	// `index * --dsh-tup-stagger`, and every curve is one of the two easing tokens, so
 	// the panel is retimed from `MOTION` in `05-constants.js`; the values in the root
@@ -44,7 +52,10 @@ const css = [
 	// Interaction feedback is deliberately NOT part of that wave: a hover or a press is
 	// immediate feedback, and gating it on a data change would read as a dead surface.
 	".dshTup_root button{transition:transform var(--dsh-tup-fast) var(--dsh-tup-ease),background-color var(--dsh-tup-fast) var(--dsh-tup-ease),border-color var(--dsh-tup-fast) var(--dsh-tup-ease),color var(--dsh-tup-fast) var(--dsh-tup-ease),opacity var(--dsh-tup-fast) var(--dsh-tup-ease)}",
-	".dshTup_root button:active:not(:disabled){transform:scale(.97)}",
+	".dshTup_root button:active:not(:disabled){transform:scale(.98)}",
+	// A card is the one surface that carries a border and a fill. It reads as raised
+	// because everything around it is flat, so the hover only has to confirm the
+	// pointer is on something interactive.
 	".dshTup_card{transition:border-color var(--dsh-tup-fast) var(--dsh-tup-ease),background-color var(--dsh-tup-fast) var(--dsh-tup-ease)}",
 	".dshTup_card:hover{border-color:var(--dsw-alias-border-l2);background:var(--dsw-alias-bg-layer-2)}",
 	// The empty heatmap cell is painted with the card's own resting surface
@@ -60,59 +71,72 @@ const css = [
 	// The chart card is the only `.dshTup_card` placed straight into that flow, and
 	// `.dshTup_card` carries no margin of its own (the overview's cards are inset by
 	// `.dshTup_overview`'s padding). Without this inset it renders full-bleed: wider
-	// than the summary and model bands above it, and clipped at the panel edges.
-	".dshTup_sessions>.dshTup_chartCard{margin:12px 20px 0}",
+	// than the flat bands above it, and clipped at the panel edges.
+	".dshTup_sessions>.dshTup_chartCard{margin:var(--dsh-tup-sp-3) var(--dsh-tup-sp-5) 0}",
 	// Padding-top matches .dshTup_overview so the title does not jump 4px when the
 	// view switches between overview and sessions.
-	".dshTup_head{flex:0 0 auto;display:flex;align-items:flex-start;gap:12px;flex-wrap:wrap;padding:12px 20px 0}",
+	".dshTup_head{flex:0 0 auto;display:flex;align-items:flex-start;gap:var(--dsh-tup-sp-3);flex-wrap:wrap;padding:var(--dsh-tup-sp-3) var(--dsh-tup-sp-5) 0}",
 	".dshTup_headMain{display:flex;flex-direction:column;gap:2px;min-width:0;flex:1 1 260px}",
-	".dshTup_title{margin:0;font-size:17px;font-weight:600}",
-	".dshTup_subtitle{margin:0;color:var(--dsw-alias-label-secondary);font-size:12px}",
+	// The title is the only large weight in the shell; the subtitle stays quiet so the
+	// two read as a caption pair rather than two competing labels.
+	".dshTup_title{margin:0;font-size:var(--dsh-tup-fs-lg);font-weight:600;letter-spacing:-.01em}",
+	".dshTup_subtitle{margin:0;color:var(--dsw-alias-label-secondary);font-size:var(--dsh-tup-fs-sm)}",
 	// margin-left:auto keeps the wrapped action row right-aligned under the title
 	// instead of dropping to the far left when the head wraps on a narrow pane.
-	".dshTup_actions{display:flex;align-items:center;gap:8px;flex:none;margin-left:auto}",
-	".dshTup_summary{flex:0 0 auto;display:flex;align-items:center;gap:16px 22px;flex-wrap:wrap;margin:12px 20px 0;padding:12px 14px;border:.5px solid var(--dsw-alias-border-l3);border-radius:var(--dsw-radius-lg);background:var(--dsw-alias-bg-layer-1)}",
+	".dshTup_actions{display:flex;align-items:center;gap:var(--dsh-tup-sp-2);flex:none;margin-left:auto}",
+	// A flat band: no border, no fill, no radius. It is separated from what follows by
+	// one hairline and from what precedes it by the view's own gap, so the page reads
+	// as one surface instead of a column of boxes.
+	".dshTup_summary{flex:0 0 auto;display:flex;align-items:center;gap:var(--dsh-tup-sp-4) var(--dsh-tup-sp-5);flex-wrap:wrap;margin:var(--dsh-tup-sp-3) var(--dsh-tup-sp-5) 0;padding-bottom:var(--dsh-tup-sp-4);border-bottom:var(--dsh-tup-hairline) solid var(--dsw-alias-border-l3)}",
 	".dshTup_sumHead{display:flex;flex-direction:column;gap:1px;flex:none;min-width:148px}",
-	".dshTup_sumLabel{color:var(--dsw-alias-label-secondary);font-size:12px}",
-	".dshTup_sumValue{font-size:24px;font-weight:600;font-variant-numeric:tabular-nums;line-height:1.25;overflow-wrap:anywhere}",
-	".dshTup_sumHint{color:var(--dsw-alias-label-tertiary);font-size:11px}",
-	".dshTup_sumBar{display:flex;flex-direction:column;gap:6px;flex:1 1 220px;min-width:170px}",
+	".dshTup_sumLabel{color:var(--dsw-alias-label-secondary);font-size:var(--dsh-tup-fs-sm)}",
+	".dshTup_sumValue{font-size:var(--dsh-tup-fs-2xl);font-weight:600;font-variant-numeric:tabular-nums;line-height:1.25;overflow-wrap:anywhere}",
+	".dshTup_sumHint{color:var(--dsw-alias-label-tertiary);font-size:var(--dsh-tup-fs-xs);font-variant-numeric:tabular-nums}",
+	".dshTup_sumBar{display:flex;flex-direction:column;gap:var(--dsh-tup-sp-2);flex:1 1 220px;min-width:170px}",
 	".dshTup_bar{display:flex;height:8px;border-radius:999px;overflow:hidden;background:var(--dsw-alias-interactive-bg-hover)}",
 	".dshTup_barSeg{height:100%;min-width:0}",
 	".dshTup_root[data-animate=true] .dshTup_barSeg{transform-origin:left center;animation:dshTup-grow var(--dsh-tup-slow) var(--dsh-tup-settle) both;transition:width var(--dsh-tup-base) var(--dsh-tup-ease)}",
-	".dshTup_legend{display:flex;flex-wrap:wrap;gap:4px 14px;font-size:11px;color:var(--dsw-alias-label-secondary)}",
-	".dshTup_legendItem{display:inline-flex;align-items:center;gap:5px;transition:transform var(--dsh-tup-fast) var(--dsh-tup-settle),opacity var(--dsh-tup-fast) var(--dsh-tup-ease)}",
-	".dshTup_legendItem:hover{transform:translateY(-1px)}",
+	".dshTup_legend{display:flex;flex-wrap:wrap;gap:var(--dsh-tup-sp-1) var(--dsh-tup-sp-4);font-size:var(--dsh-tup-fs-xs);color:var(--dsw-alias-label-secondary)}",
+	// Hover confirms the target with colour alone: a lift on a legend row that is not
+	// clickable reads as a broken affordance.
+	".dshTup_legendItem{display:inline-flex;align-items:center;gap:var(--dsh-tup-sp-1);transition:opacity var(--dsh-tup-fast) var(--dsh-tup-ease)}",
+	".dshTup_legendItem:hover{opacity:.82}",
+	// The swatch is the same mark in every chart, legend and tooltip, so it is one rule.
 	".dshTup_dot{width:8px;height:8px;border-radius:2px;flex:none}",
 	".dshTup_legendNum{color:var(--dsw-alias-label-primary);font-variant-numeric:tabular-nums}",
-	".dshTup_stats{display:grid;grid-template-columns:repeat(2,minmax(84px,auto));gap:2px 20px;margin:0;flex:none}",
-	".dshTup_stat{display:flex;align-items:baseline;gap:8px}",
-	".dshTup_stat dt{color:var(--dsw-alias-label-secondary);font-size:11px;white-space:nowrap}",
-	".dshTup_stat dd{margin:0;font-size:13px;font-variant-numeric:tabular-nums;font-weight:500}",
-	".dshTup_grand{flex:1 1 100%;display:flex;align-items:center;gap:6px;color:var(--dsw-alias-label-tertiary);font-size:11px}",
+	".dshTup_stats{display:grid;grid-template-columns:repeat(2,minmax(84px,auto));gap:2px var(--dsh-tup-sp-5);margin:0;flex:none}",
+	".dshTup_stat{display:flex;align-items:baseline;gap:var(--dsh-tup-sp-2)}",
+	".dshTup_stat dt{color:var(--dsw-alias-label-secondary);font-size:var(--dsh-tup-fs-xs);white-space:nowrap}",
+	".dshTup_stat dd{margin:0;font-size:var(--dsh-tup-fs-md);font-variant-numeric:tabular-nums;font-weight:500}",
+	".dshTup_grand{flex:1 1 100%;display:flex;align-items:center;gap:var(--dsh-tup-sp-2);color:var(--dsw-alias-label-tertiary);font-size:var(--dsh-tup-fs-xs)}",
 	".dshTup_grandNum{color:var(--dsw-alias-label-secondary);font-variant-numeric:tabular-nums}",
 	//#endregion
 
 	//#region per-model breakdown
-	".dshTup_routes{flex:0 0 auto;display:flex;flex-direction:column;gap:6px;margin:12px 20px 0;padding:10px 14px;border:.5px solid var(--dsw-alias-border-l3);border-radius:var(--dsw-radius-lg);background:var(--dsw-alias-bg-layer-1)}",
-	".dshTup_routeHead{display:flex;align-items:baseline;justify-content:space-between;gap:12px;flex-wrap:wrap}",
-	".dshTup_routeList{display:flex;flex-wrap:wrap;gap:6px 10px;margin:0;padding:0;list-style:none}",
-	".dshTup_routeItem{display:inline-flex;align-items:center;gap:6px;box-sizing:border-box;max-width:100%;padding:3px 8px;border:.5px solid var(--dsw-alias-border-l1);border-radius:var(--dsw-radius-sm);background:var(--dsw-alias-bg-base);font-size:12px;transition:border-color var(--dsh-tup-fast) var(--dsh-tup-ease),transform var(--dsh-tup-fast) var(--dsh-tup-settle)}",
-	".dshTup_routeItem:hover{border-color:var(--dsw-alias-border-l2);transform:translateY(-1px)}",
-	".dshTup_routeProvider{color:var(--dsw-alias-label-tertiary);font-size:11px}",
+	// The second flat band: same treatment as the summary, so the two read as sections
+	// of one page.
+	".dshTup_routes{flex:0 0 auto;display:flex;flex-direction:column;gap:var(--dsh-tup-sp-2);margin:var(--dsh-tup-sp-3) var(--dsh-tup-sp-5) 0;padding-bottom:var(--dsh-tup-sp-4);border-bottom:var(--dsh-tup-hairline) solid var(--dsw-alias-border-l3)}",
+	".dshTup_routeHead{display:flex;align-items:baseline;justify-content:space-between;gap:var(--dsh-tup-sp-3);flex-wrap:wrap}",
+	".dshTup_routeList{display:flex;flex-wrap:wrap;gap:var(--dsh-tup-sp-2) var(--dsh-tup-sp-3);margin:0;padding:0;list-style:none}",
+	// The chip sits on `bg-layer-1` rather than the page base: it has to read as a
+	// raised token now that the band behind it is flat, and on the page base it would
+	// be the same colour as its own background.
+	".dshTup_routeItem{display:inline-flex;align-items:center;gap:var(--dsh-tup-sp-2);box-sizing:border-box;max-width:100%;padding:3px var(--dsh-tup-sp-2);border:var(--dsh-tup-hairline) solid var(--dsw-alias-border-l1);border-radius:var(--dsw-radius-sm);background:var(--dsw-alias-bg-layer-1);font-size:var(--dsh-tup-fs-sm);transition:border-color var(--dsh-tup-fast) var(--dsh-tup-ease)}",
+	".dshTup_routeItem:hover{border-color:var(--dsw-alias-border-l2)}",
+	".dshTup_routeProvider{color:var(--dsw-alias-label-tertiary);font-size:var(--dsh-tup-fs-xs)}",
 	".dshTup_routeModel{color:var(--dsw-alias-label-primary);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:220px}",
 	".dshTup_routeTokens{color:var(--dsw-alias-label-secondary);font-variant-numeric:tabular-nums}",
-	".dshTup_routeShare{color:var(--dsw-alias-label-tertiary);font-size:11px;font-variant-numeric:tabular-nums;min-width:38px;text-align:right}",
+	".dshTup_routeShare{color:var(--dsw-alias-label-tertiary);font-size:var(--dsh-tup-fs-xs);font-variant-numeric:tabular-nums;min-width:38px;text-align:right}",
 	".dshTup_routeMoney{color:var(--dsw-alias-label-primary);font-variant-numeric:tabular-nums;font-weight:500}",
-	".dshTup_routeHint{margin:0;color:var(--dsw-alias-label-tertiary);font-size:11px}",
+	".dshTup_routeHint{margin:0;color:var(--dsw-alias-label-tertiary);font-size:var(--dsh-tup-fs-xs)}",
 	// Grouped reading: one block per gateway, its own header carrying the rolled-up
 	// total and share, the same chips inside. The chips stay chips — grouping only
 	// adds the headers and the column direction.
-	".dshTup_routeGroups{display:flex;flex-direction:column;gap:10px;margin:0;padding:0;list-style:none}",
-	".dshTup_routeGroup{display:flex;flex-direction:column;gap:5px;min-width:0}",
-	".dshTup_routeGroupHead{display:flex;align-items:baseline;gap:8px}",
-	".dshTup_routeGroupName{color:var(--dsw-alias-label-secondary);font-size:11px;font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}",
-	".dshTup_root .dshTup_routeButton{display:inline-flex;align-items:center;gap:6px;box-sizing:border-box;max-width:100%;border:0;background:transparent;color:inherit;font:inherit;padding:0;cursor:pointer}",
+	".dshTup_routeGroups{display:flex;flex-direction:column;gap:var(--dsh-tup-sp-3);margin:0;padding:0;list-style:none}",
+	".dshTup_routeGroup{display:flex;flex-direction:column;gap:var(--dsh-tup-sp-1);min-width:0}",
+	".dshTup_routeGroupHead{display:flex;align-items:baseline;gap:var(--dsh-tup-sp-2)}",
+	".dshTup_routeGroupName{color:var(--dsw-alias-label-secondary);font-size:var(--dsh-tup-fs-xs);font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}",
+	".dshTup_root .dshTup_routeButton{display:inline-flex;align-items:center;gap:var(--dsh-tup-sp-2);box-sizing:border-box;max-width:100%;border:0;background:transparent;color:inherit;font:inherit;padding:0;cursor:pointer}",
 	//#endregion
 
 	//#region views and charts
@@ -125,23 +149,28 @@ const css = [
 	// cards now sit in normal flow and scroll with the page, so no combination of
 	// card content can push anything out of reach.
 	".dshTup_root[data-view=overview]{overflow-y:auto;overscroll-behavior:contain}",
-	".dshTup_overview{flex:0 0 auto;display:flex;flex-direction:column;gap:12px;padding:12px 20px 0}",
+	".dshTup_overview{flex:0 0 auto;display:flex;flex-direction:column;gap:var(--dsh-tup-sp-3);padding:var(--dsh-tup-sp-3) var(--dsh-tup-sp-5) 0}",
 	// `min-height:0` + `overflow-y:auto` make this the scrollport for the sessions
 	// view. The table keeps its own inner scroller (the virtual window needs a
 	// definite `clientHeight`), so a tall table scrolls inside the page scroll
 	// rather than growing without bound.
 	".dshTup_sessions{flex:1 1 auto;display:flex;flex-direction:column;min-height:0;overflow-y:auto;overscroll-behavior:contain}",
-	".dshTup_kpi{flex:0 0 auto;display:flex;flex-wrap:wrap;align-items:stretch;gap:6px 0;padding:12px 14px;border:.5px solid var(--dsw-alias-border-l3);border-radius:var(--dsw-radius-lg);background:var(--dsw-alias-bg-layer-1)}",
-	".dshTup_kpiItem{flex:1 1 130px;display:flex;flex-direction:column;align-items:center;gap:2px;padding:0 12px;min-width:0}",
-	".dshTup_kpiItem+.dshTup_kpiItem{border-left:.5px solid var(--dsw-alias-border-l1)}",
-	".dshTup_kpiValue{font-size:20px;font-weight:600;font-variant-numeric:tabular-nums;white-space:nowrap}",
-	".dshTup_kpiLabel{color:var(--dsw-alias-label-secondary);font-size:11px;white-space:nowrap}",
-	".dshTup_card{display:flex;flex-direction:column;gap:10px;padding:12px 14px;border:.5px solid var(--dsw-alias-border-l3);border-radius:var(--dsw-radius-lg);background:var(--dsw-alias-bg-layer-1)}",
-	".dshTup_cardHead{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap}",
-	".dshTup_cardTitle{margin:0;font-size:13px;font-weight:600}",
+	// The KPI strip is a flat band too: four figures separated by hairlines, closed by
+	// one rule under the row. It is the first thing in the overview, so it needs no
+	// rule above it.
+	".dshTup_kpi{flex:0 0 auto;display:flex;flex-wrap:wrap;align-items:stretch;gap:var(--dsh-tup-sp-2) 0;padding-bottom:var(--dsh-tup-sp-4);border-bottom:var(--dsh-tup-hairline) solid var(--dsw-alias-border-l3)}",
+	".dshTup_kpiItem{flex:1 1 130px;display:flex;flex-direction:column;align-items:center;gap:2px;padding:0 var(--dsh-tup-sp-3);min-width:0}",
+	".dshTup_kpiItem+.dshTup_kpiItem{border-left:var(--dsh-tup-hairline) solid var(--dsw-alias-border-l1)}",
+	// The figure carries the weight and the label stays small and quiet, so the strip
+	// scans as numbers with captions rather than four equal-weight blocks.
+	".dshTup_kpiValue{font-size:var(--dsh-tup-fs-xl);font-weight:600;font-variant-numeric:tabular-nums;letter-spacing:-.01em;white-space:nowrap}",
+	".dshTup_kpiLabel{color:var(--dsw-alias-label-secondary);font-size:var(--dsh-tup-fs-xs);white-space:nowrap}",
+	".dshTup_card{display:flex;flex-direction:column;gap:var(--dsh-tup-sp-3);padding:var(--dsh-tup-sp-3) var(--dsh-tup-sp-4);border:var(--dsh-tup-hairline) solid var(--dsw-alias-border-l3);border-radius:var(--dsw-radius-lg);background:var(--dsw-alias-bg-layer-1)}",
+	".dshTup_cardHead{display:flex;align-items:center;justify-content:space-between;gap:var(--dsh-tup-sp-3);flex-wrap:wrap}",
+	".dshTup_cardTitle{margin:0;font-size:var(--dsh-tup-fs-md);font-weight:600}",
 	".dshTup_chartCard{flex:0 0 auto}",
-	".dshTup_chartHint{margin:0;color:var(--dsw-alias-label-tertiary);font-size:11px}",
-	".dshTup_legendRow{display:flex;flex-wrap:wrap;gap:4px 14px;font-size:11px;color:var(--dsw-alias-label-secondary)}",
+	".dshTup_chartHint{margin:0;color:var(--dsw-alias-label-tertiary);font-size:var(--dsh-tup-fs-xs)}",
+	".dshTup_legendRow{display:flex;flex-wrap:wrap;gap:var(--dsh-tup-sp-1) var(--dsh-tup-sp-4);font-size:var(--dsh-tup-fs-xs);color:var(--dsw-alias-label-secondary)}",
 	".dshTup_cell{transform-box:fill-box;transform-origin:center;transition:opacity var(--dsh-tup-fast) var(--dsh-tup-ease),transform var(--dsh-tup-fast) var(--dsh-tup-settle)}",
 	".dshTup_cell:hover{opacity:.8;transform:scale(1.18)}",
 	// The heatmap wave: the SVG groups its cells by week column, so this is 53
@@ -152,7 +181,7 @@ const css = [
 	// follow that, or the empty cells read as clickable too.
 	".dshTup_cell[role=button]{cursor:pointer}",
 	".dshTup_cell[role=button]:focus-visible{outline:var(--dsw-focus-ring-width) solid var(--dsw-focus-ring-color,var(--dsw-alias-state-business-primary));outline-offset:1px}",
-	".dshTup_axisLabel{fill:var(--dsw-alias-label-tertiary);font-size:11px}",
+	".dshTup_axisLabel{fill:var(--dsw-alias-label-tertiary);font-size:var(--dsh-tup-fs-xs)}",
 	// A `width:100%;height:auto` SVG against a fixed viewBox scales its text with
 	// the container (an 11px axis label rendered ~14.6px wide, ~2.5px narrow), and
 	// capping the rendered width to a band fixed that by leaving the right of a wide
@@ -177,16 +206,16 @@ const css = [
 	// The gateway is its own bounded chip rather than a prefix blended into the model
 	// name, because the two are different facts: `opencodegochat` is the route taken,
 	// the model is what answered.
-	".dshTup_providerTag{flex:none;display:inline-flex;align-items:center;box-sizing:border-box;padding:0 5px;border:.5px solid var(--dsw-alias-border-l2);border-radius:var(--dsw-radius-xs);background:var(--dsw-alias-bg-layer-2);color:var(--dsw-alias-label-secondary);font-size:10px;line-height:16px;white-space:nowrap}",
-	".dshTup_modelName{display:inline-flex;align-items:center;gap:6px;min-width:0}",
+	".dshTup_providerTag{flex:none;display:inline-flex;align-items:center;box-sizing:border-box;padding:0 var(--dsh-tup-sp-1);border:var(--dsh-tup-hairline) solid var(--dsw-alias-border-l2);border-radius:var(--dsw-radius-xs);background:var(--dsw-alias-bg-layer-2);color:var(--dsw-alias-label-secondary);font-size:var(--dsh-tup-fs-2xs);line-height:16px;white-space:nowrap}",
+	".dshTup_modelName{display:inline-flex;align-items:center;gap:var(--dsh-tup-sp-2);min-width:0}",
 	".dshTup_modelText{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}",
-	".dshTup_tooltip{position:absolute;top:4px;transform:translateX(-50%);min-width:150px;max-width:240px;padding:7px 9px;border:.5px solid var(--dsw-alias-border-l2);border-radius:var(--dsw-radius-md);background:var(--dsw-alias-bg-overlay,var(--dsw-alias-bg-layer-2));box-shadow:var(--dsw-shadow-lv2);font-size:11px;pointer-events:none;z-index:3}",
+	".dshTup_tooltip{position:absolute;top:var(--dsh-tup-sp-1);transform:translateX(-50%);min-width:150px;max-width:240px;padding:var(--dsh-tup-sp-2) var(--dsh-tup-sp-2);border:var(--dsh-tup-hairline) solid var(--dsw-alias-border-l2);border-radius:var(--dsw-radius-md);background:var(--dsw-alias-bg-overlay,var(--dsw-alias-bg-layer-2));box-shadow:var(--dsw-shadow-lv2);font-size:var(--dsh-tup-fs-xs);pointer-events:none;z-index:3}",
 	".dshTup_root[data-animate=true] .dshTup_tooltip{animation:dshTup-tipIn var(--dsh-tup-fast) var(--dsh-tup-ease) both}",
-	".dshTup_tooltipDay{color:var(--dsw-alias-label-secondary);margin-bottom:4px}",
-	".dshTup_tooltipRow{display:flex;align-items:center;gap:6px}",
+	".dshTup_tooltipDay{color:var(--dsw-alias-label-secondary);margin-bottom:var(--dsh-tup-sp-1)}",
+	".dshTup_tooltipRow{display:flex;align-items:center;gap:var(--dsh-tup-sp-2)}",
 	".dshTup_tooltipLabel{color:var(--dsw-alias-label-secondary);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1 1 auto;min-width:0}",
 	".dshTup_tooltipValue{font-variant-numeric:tabular-nums;font-weight:500}",
-	".dshTup_donutWrap{display:flex;align-items:center;gap:18px;flex-wrap:wrap}",
+	".dshTup_donutWrap{display:flex;align-items:center;gap:var(--dsh-tup-sp-5);flex-wrap:wrap}",
 	".dshTup_donut{flex:0 0 auto;width:170px;height:170px}",
 	".dshTup_donutTrack{stroke:var(--dsw-alias-bg-layer-2)}",
 	".dshTup_donutSegment{transition:stroke-dashoffset var(--dsh-tup-slow) var(--dsh-tup-ease)}",
@@ -195,20 +224,20 @@ const css = [
 	// would fight the data. Rotating the group into place is the growth animation.
 	".dshTup_donutSweep{transform-box:fill-box;transform-origin:center}",
 	".dshTup_root[data-animate=true] .dshTup_donutSweep{animation:dshTup-sweep var(--dsh-tup-slow) var(--dsh-tup-settle) both}",
-	".dshTup_donutValue{fill:var(--dsw-alias-label-primary);font-size:20px;font-weight:600}",
-	".dshTup_donutUnit{fill:var(--dsw-alias-label-tertiary);font-size:10px}",
+	".dshTup_donutValue{fill:var(--dsw-alias-label-primary);font-size:var(--dsh-tup-fs-xl);font-weight:600;font-variant-numeric:tabular-nums}",
+	".dshTup_donutUnit{fill:var(--dsw-alias-label-tertiary);font-size:var(--dsh-tup-fs-2xs)}",
 	".dshTup_modelList{flex:1 1 260px;min-width:0;display:flex;flex-direction:column;gap:2px;margin:0;padding:0;list-style:none}",
-	".dshTup_modelButton{display:flex;align-items:center;gap:8px;width:100%;box-sizing:border-box;border:0;border-radius:var(--dsw-radius-sm);background:transparent;color:inherit;font:inherit;padding:5px 6px;cursor:pointer;text-align:left;transition:background var(--dsh-tup-fast) var(--dsh-tup-ease),transform var(--dsh-tup-fast) var(--dsh-tup-settle)}",
+	".dshTup_modelButton{display:flex;align-items:center;gap:var(--dsh-tup-sp-2);width:100%;box-sizing:border-box;border:0;border-radius:var(--dsw-radius-sm);background:transparent;color:inherit;font:inherit;padding:var(--dsh-tup-sp-1) var(--dsh-tup-sp-2);cursor:pointer;text-align:left;transition:background var(--dsh-tup-fast) var(--dsh-tup-ease)}",
 	".dshTup_modelButton:hover{background:var(--dsw-alias-interactive-bg-hover)}",
 	".dshTup_modelLabels{display:flex;flex-direction:column;gap:1px;flex:1 1 auto;min-width:0}",
 	".dshTup_modelName{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}",
-	".dshTup_modelMeta{color:var(--dsw-alias-label-tertiary);font-size:11px}",
-	".dshTup_modelShare{color:var(--dsw-alias-label-secondary);font-variant-numeric:tabular-nums;font-size:12px}",
+	".dshTup_modelMeta{color:var(--dsw-alias-label-tertiary);font-size:var(--dsh-tup-fs-xs);font-variant-numeric:tabular-nums}",
+	".dshTup_modelShare{color:var(--dsw-alias-label-secondary);font-variant-numeric:tabular-nums;font-size:var(--dsh-tup-fs-sm)}",
 	//#endregion
 
 	//#region filter band
-	".dshTup_filters{flex:0 0 auto;display:flex;flex-direction:column;gap:8px;padding:12px 20px 0}",
-	".dshTup_filterRow{display:flex;align-items:center;gap:8px;flex-wrap:wrap}",
+	".dshTup_filters{flex:0 0 auto;display:flex;flex-direction:column;gap:var(--dsh-tup-sp-2);padding:var(--dsh-tup-sp-3) var(--dsh-tup-sp-5) 0}",
+	".dshTup_filterRow{display:flex;align-items:center;gap:var(--dsh-tup-sp-2);flex-wrap:wrap}",
 	".dshTup_root .dshTup_search{height:36px;flex:1 1 220px;min-width:170px}",
 	".dshTup_root .dshTup_menu{display:inline-flex;flex:none}",
 	".dshTup_root .dshTup_trigger{max-width:230px}",
@@ -216,8 +245,8 @@ const css = [
 	".dshTup_chevron{flex:none;transition:transform var(--dsh-tup-fast) var(--dsh-tup-ease)}",
 	".dshTup_chevronOpen{transform:rotate(180deg)}",
 	".dshTup_filterSpacer{flex:1 1 0;min-width:0}",
-	".dshTup_menuLabelRow{display:inline-flex;align-items:center;gap:6px}",
-	".dshTup_menuCount{color:var(--dsw-alias-label-tertiary);font-size:11px}",
+	".dshTup_menuLabelRow{display:inline-flex;align-items:center;gap:var(--dsh-tup-sp-2)}",
+	".dshTup_menuCount{color:var(--dsw-alias-label-tertiary);font-size:var(--dsh-tup-fs-xs)}",
 	//#endregion
 
 	//#region the table
@@ -231,8 +260,8 @@ const css = [
 	// Only the ::-webkit-scrollbar family is declared: the host is Chromium, where
 	// those pseudo-elements take precedence over scrollbar-width/scrollbar-color, so
 	// declaring both would leave the standard properties silently dead.
-	".dshTup_tableWrap{flex:0 0 auto;margin:12px 20px 0}",
-	".dshTup_tableScroll{overflow-x:auto;overscroll-behavior-x:contain;border:.5px solid var(--dsw-alias-border-l3);border-radius:var(--dsw-radius-lg);background:var(--dsw-alias-bg-layer-1)}",
+	".dshTup_tableWrap{flex:0 0 auto;margin:var(--dsh-tup-sp-3) var(--dsh-tup-sp-5) 0}",
+	".dshTup_tableScroll{overflow-x:auto;overscroll-behavior-x:contain;border:var(--dsh-tup-hairline) solid var(--dsw-alias-border-l3);border-radius:var(--dsw-radius-lg);background:var(--dsw-alias-bg-layer-1)}",
 	".dshTup_tableWrap[data-scrolled=true] .dshTup_tableScroll{border-color:var(--dsw-alias-border-l2)}",
 	".dshTup_root[data-animate=true] .dshTup_tableScroll{transition:border-color var(--dsh-tup-base) var(--dsh-tup-ease)}",
 	".dshTup_tableScroll::-webkit-scrollbar{width:10px;height:10px}",
@@ -240,25 +269,26 @@ const css = [
 	".dshTup_tableScroll::-webkit-scrollbar-thumb{background:var(--dsw-alias-scrollbar-bg-l2);background-clip:content-box;border:2px solid transparent;border-radius:999px}",
 	".dshTup_tableScroll::-webkit-scrollbar-thumb:hover{background:var(--dsw-alias-scrollbar-hover-l2);background-clip:content-box}",
 	".dshTup_tableScroll::-webkit-scrollbar-corner{background:transparent}",
-	// `min(720px,100%)` keeps the columns from crushing while never exceeding the
-	// container: a bare 720px floor would force a horizontal scrollbar as soon as
-	// the pane is narrower than the sum of the visible columns.
-	".dshTup_table{width:100%;min-width:min(720px,100%);border-collapse:separate;border-spacing:0;font-size:13px}",
+	// Fixed layout makes the browser honour the colgroup widths exactly, which is
+	// what a drag must do; `min(720px,100%)` keeps the columns from crushing while
+	// never exceeding the container, because a bare 720px floor would force a
+	// horizontal scrollbar as soon as the pane is narrower than the visible columns.
+	".dshTup_table{width:100%;min-width:min(720px,100%);border-collapse:separate;border-spacing:0;font-size:var(--dsh-tup-fs-md);table-layout:fixed}",
+	// The header is a quieter strip than the body: same surface, muted label colour,
+	// and it sticks so the column meaning survives a long page.
 	".dshTup_table th{position:sticky;top:0;z-index:2;background:var(--dsw-alias-bg-layer-2);color:var(--dsw-alias-label-secondary);font-weight:500;text-align:right;white-space:nowrap;padding:0}",
 	".dshTup_root[data-scrolled=true] .dshTup_table th{box-shadow:inset 0 -1px 0 var(--dsw-alias-border-l2)}",
-	".dshTup_thBtn{display:flex;align-items:center;justify-content:flex-end;gap:4px;width:100%;box-sizing:border-box;padding:9px 12px;border:0;border-bottom:.5px solid var(--dsw-alias-border-l3);background:transparent;color:inherit;font:inherit;font-weight:500;text-align:inherit;cursor:pointer;border-radius:0}",
-	".dshTup_thStatic{display:flex;align-items:center;justify-content:flex-end;padding:9px 12px;border-bottom:.5px solid var(--dsw-alias-border-l3)}",
+	".dshTup_thBtn{display:flex;align-items:center;justify-content:flex-end;gap:var(--dsh-tup-sp-1);width:100%;box-sizing:border-box;padding:var(--dsh-tup-sp-2) var(--dsh-tup-sp-3);border:0;border-bottom:var(--dsh-tup-hairline) solid var(--dsw-alias-border-l3);background:transparent;color:inherit;font:inherit;font-weight:500;text-align:inherit;cursor:pointer;border-radius:0}",
+	".dshTup_thStatic{display:flex;align-items:center;justify-content:flex-end;padding:var(--dsh-tup-sp-2) var(--dsh-tup-sp-3);border-bottom:var(--dsh-tup-hairline) solid var(--dsw-alias-border-l3)}",
 	".dshTup_thBtn:hover{color:var(--dsw-alias-label-primary)}",
 	".dshTup_thBtn:focus-visible{outline:var(--dsw-focus-ring-width) solid var(--dsw-focus-ring-color,var(--dsw-alias-state-business-primary));outline-offset:-2px}",
 	".dshTup_colSession .dshTup_thBtn,.dshTup_colSession .dshTup_thStatic{justify-content:flex-start}",
 	".dshTup_sortGlyph{flex:none;opacity:.85}",
-	// Fixed layout makes the browser honour the colgroup widths exactly, which is
-	// what a drag must do; `th` is already position:sticky, so it is the containing
-	// block for the absolutely positioned handle below.
-	".dshTup_table{table-layout:fixed}",
+	// `th` is already position:sticky, so it is the containing block for the
+	// absolutely positioned handle below.
 	".dshTup_resizeHandle{position:absolute;top:0;right:-3px;width:7px;height:100%;cursor:col-resize;touch-action:none}",
 	".dshTup_resizeHandle:hover{background:var(--dsw-alias-border-l2)}",
-	".dshTup_table td{box-sizing:border-box;height:var(--dsh-tup-row-h);padding:8px 12px;border-bottom:.5px solid var(--dsw-alias-border-l1);text-align:right;vertical-align:middle;font-variant-numeric:tabular-nums;white-space:nowrap}",
+	".dshTup_table td{box-sizing:border-box;height:var(--dsh-tup-row-h);padding:var(--dsh-tup-sp-2) var(--dsh-tup-sp-3);border-bottom:var(--dsh-tup-hairline) solid var(--dsw-alias-border-l1);text-align:right;vertical-align:middle;font-variant-numeric:tabular-nums;white-space:nowrap}",
 	".dshTup_spacer td{height:auto;padding:0;border:0;background:transparent}",
 	"@keyframes dshTup-rowIn{from{opacity:0;transform:translateY(-4px)}to{opacity:1;transform:none}}",
 	// Rows land as a wave: each row carries its page index as `--dsh-tup-i` (see
@@ -268,39 +298,41 @@ const css = [
 	".dshTup_table tbody tr[data-row]{transition:background var(--dsh-tup-fast) var(--dsh-tup-ease),box-shadow var(--dsh-tup-fast) var(--dsh-tup-ease)}",
 	".dshTup_table tbody tr[data-row]:last-child td{border-bottom:none}",
 	".dshTup_row{cursor:pointer}",
+	// One accent for interaction, spent as a 2px inset bar on hover; the current row
+	// is marked by surface alone so it does not compete with the hover state.
 	".dshTup_row:hover{background:var(--dsw-alias-interactive-bg-hover);box-shadow:inset 2px 0 0 var(--dsw-alias-brand-primary)}",
 	".dshTup_row:focus-visible{outline:var(--dsw-focus-ring-width) solid var(--dsw-focus-ring-color,var(--dsw-alias-state-business-primary));outline-offset:-2px}",
 	".dshTup_rowCurrent{background:var(--dsw-alias-interactive-bg-hover)}",
 	".dshTup_cellMain{display:flex;flex-direction:column;gap:2px;min-width:0;overflow:hidden}",
-	".dshTup_rowTitle{display:flex;align-items:center;gap:6px;min-width:0}",
+	".dshTup_rowTitle{display:flex;align-items:center;gap:var(--dsh-tup-sp-2);min-width:0}",
 	".dshTup_rowTitleText{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}",
-	".dshTup_rowMeta{color:var(--dsw-alias-label-tertiary);font-size:11px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}",
-	".dshTup_share{display:flex;align-items:center;gap:8px;justify-content:flex-end}",
+	".dshTup_rowMeta{color:var(--dsw-alias-label-tertiary);font-size:var(--dsh-tup-fs-xs);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}",
+	".dshTup_share{display:flex;align-items:center;gap:var(--dsh-tup-sp-2);justify-content:flex-end}",
 	".dshTup_shareTrack{width:56px;height:6px;border-radius:999px;background:var(--dsw-alias-interactive-bg-hover);overflow:hidden;flex:none}",
 	".dshTup_shareFill{height:100%;background:var(--dsw-alias-brand-primary);border-radius:999px}",
 	".dshTup_root[data-animate=true] .dshTup_shareFill{transform-origin:left center;animation:dshTup-grow var(--dsh-tup-slow) var(--dsh-tup-settle) both;transition:width var(--dsh-tup-base) var(--dsh-tup-ease)}",
-	".dshTup_shareNum{min-width:42px;text-align:right;color:var(--dsw-alias-label-secondary);font-size:12px}",
+	".dshTup_shareNum{min-width:42px;text-align:right;color:var(--dsw-alias-label-secondary);font-size:var(--dsh-tup-fs-sm);font-variant-numeric:tabular-nums}",
 	".dshTup_muted{color:var(--dsw-alias-label-tertiary)}",
-	".dshTup_retry{display:inline-flex;align-items:center;gap:4px;border:0;background:transparent;color:var(--dsw-alias-state-warn-primary);font:inherit;font-size:11px;padding:0;cursor:pointer;text-decoration:underline;text-underline-offset:2px}",
+	".dshTup_retry{display:inline-flex;align-items:center;gap:var(--dsh-tup-sp-1);border:0;background:transparent;color:var(--dsw-alias-state-warn-primary);font:inherit;font-size:var(--dsh-tup-fs-xs);padding:0;cursor:pointer;text-decoration:underline;text-underline-offset:2px}",
 	//#endregion
 
 	//#region empty, skeleton, footer
-	".dshTup_empty{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;min-height:200px;padding:28px 16px;text-align:center;color:var(--dsw-alias-label-secondary)}",
+	".dshTup_empty{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:var(--dsh-tup-sp-2);min-height:200px;padding:var(--dsh-tup-sp-6) var(--dsh-tup-sp-4);text-align:center;color:var(--dsw-alias-label-secondary)}",
 	".dshTup_emptyIcon{color:var(--dsw-alias-label-dimmed)}",
 	"@keyframes dshTup-shimmer{from{transform:translateX(-100%)}to{transform:translateX(100%)}}",
-	".dshTup_skelRow{display:flex;align-items:center;gap:16px;padding:0 14px;height:var(--dsh-tup-row-h);border-bottom:.5px solid var(--dsw-alias-border-l1)}",
+	".dshTup_skelRow{display:flex;align-items:center;gap:var(--dsh-tup-sp-4);padding:0 var(--dsh-tup-sp-4);height:var(--dsh-tup-row-h);border-bottom:var(--dsh-tup-hairline) solid var(--dsw-alias-border-l1)}",
 	".dshTup_skel{position:relative;height:10px;border-radius:999px;background:var(--dsw-alias-bg-layer-2);overflow:hidden;flex:none}",
 	".dshTup_skel::after{content:\"\";position:absolute;inset:0;background:linear-gradient(90deg,transparent,var(--dsw-alias-interactive-bg-hover),transparent);animation:dshTup-shimmer 1.4s linear infinite}",
 	".dshTup_skelGrow{flex:1 1 auto;min-width:0;max-width:280px}",
 	// margin-top (not padding-top) so the seam above the footer is the same 12px
 	// every other band-to-band gap uses.
-	".dshTup_foot{flex:0 0 auto;display:flex;align-items:center;flex-wrap:wrap;gap:6px 14px;margin-top:12px;padding:0 20px 14px;color:var(--dsw-alias-label-tertiary);font-size:12px}",
+	".dshTup_foot{flex:0 0 auto;display:flex;align-items:center;flex-wrap:wrap;gap:var(--dsh-tup-sp-2) var(--dsh-tup-sp-4);margin-top:var(--dsh-tup-sp-3);padding:0 var(--dsh-tup-sp-5) var(--dsh-tup-sp-4);color:var(--dsw-alias-label-tertiary);font-size:var(--dsh-tup-fs-sm);font-variant-numeric:tabular-nums}",
 	// Visually hidden but still announced: clipped rather than `display:none`, which
 	// would remove the live region from the accessibility tree entirely.
 	".dshTup_live{position:absolute;width:1px;height:1px;margin:-1px;padding:0;overflow:hidden;clip-path:inset(50%);white-space:nowrap;border:0}",
 	".dshTup_footSpacer{flex:1 1 0;min-width:0}",
-	".dshTup_pagination{display:inline-flex;align-items:center;gap:6px}",
-	".dshTup_notice{display:inline-flex;align-items:center;gap:4px;color:var(--dsw-alias-state-warn-primary)}",
+	".dshTup_pagination{display:inline-flex;align-items:center;gap:var(--dsh-tup-sp-2)}",
+	".dshTup_notice{display:inline-flex;align-items:center;gap:var(--dsh-tup-sp-1);color:var(--dsw-alias-state-warn-primary)}",
 	//#endregion
 
 	//#region responsive columns
@@ -321,12 +353,15 @@ const css = [
 	// into with `body[data-ds-dark-theme]`, so `body:not([data-ds-dark-theme])`
 	// scopes these to light without touching dark.
 	"body:not([data-ds-dark-theme]) .dshTup_root{--dsw-alias-label-tertiary:#61666b;--dsw-alias-state-warn-primary:#b45309;--dsw-alias-state-success-primary:#15803d;--dsw-alias-state-business-primary:#2563eb}",
-	// The chart palette follows the same split. The defaults below are the original
-	// mid-saturation hexes, tuned for the dark surface; the light block deepens each
-	// hue to clear 3:1 against white, since these paint thin strokes, small donut
-	// arcs and heatmap cells rather than large fills.
-	":root{--dsh-tup-c1:#5b9dff;--dsh-tup-c2:#4ecb71;--dsh-tup-c3:#b98cff;--dsh-tup-c4:#ff6b6b;--dsh-tup-c5:#ffab4d;--dsh-tup-c6:#39c7c7;--dsh-tup-c7:#ff8ad4;--dsh-tup-c8:#9aa7b8;--dsh-tup-other:#8b93a1;--dsh-tup-heat:#5b9dff}",
-	"body:not([data-ds-dark-theme]){--dsh-tup-c1:#2563eb;--dsh-tup-c2:#15803d;--dsh-tup-c3:#7c3aed;--dsh-tup-c4:#dc2626;--dsh-tup-c5:#b45309;--dsh-tup-c6:#0f766e;--dsh-tup-c7:#be185d;--dsh-tup-c8:#475569;--dsh-tup-other:#64748b;--dsh-tup-heat:#2563eb}",
+	// The series palette. Eight hues spread around the wheel so two neighbouring
+	// routes never land on similar colours, and every hue is a *tone* rather than a
+	// pure hue: the dark set is lightened so it reads on the dark surface, the light
+	// set is deepened so each clears 3:1 against white (these paint thin strokes,
+	// small donut arcs and heatmap cells, never large fills). `--dsh-tup-other` is
+	// deliberately neutral — it is the merged bucket, not a route — and the heat
+	// ramp reuses the first series colour.
+	":root{--dsh-tup-c1:#60a5fa;--dsh-tup-c2:#34d399;--dsh-tup-c3:#a78bfa;--dsh-tup-c4:#fb7185;--dsh-tup-c5:#fbbf24;--dsh-tup-c6:#22d3ee;--dsh-tup-c7:#e879f9;--dsh-tup-c8:#94a3b8;--dsh-tup-other:#a1a1aa;--dsh-tup-heat:#60a5fa}",
+	"body:not([data-ds-dark-theme]){--dsh-tup-c1:#2563eb;--dsh-tup-c2:#047857;--dsh-tup-c3:#6d28d9;--dsh-tup-c4:#be123c;--dsh-tup-c5:#a16207;--dsh-tup-c6:#0e7490;--dsh-tup-c7:#a21caf;--dsh-tup-c8:#4d7c0f;--dsh-tup-other:#64748b;--dsh-tup-heat:#2563eb}",
 	//#endregion
 
 	"@media (prefers-reduced-motion:reduce){.dshTup_root{animation:none}.dshTup_root *,.dshTup_root *::before,.dshTup_root *::after{transition:none!important;animation:none!important}}",
