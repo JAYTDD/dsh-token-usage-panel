@@ -29,6 +29,14 @@ const MOTION = Object.freeze({
 	base: 220,
 	/** Chart growth: a line draw, a ring sweep, a heatmap wave. */
 	slow: 460,
+	/**
+	 * The headline count-up: how long one run takes, in milliseconds.
+	 *
+	 * Every duration the panel animates lives in this table, so retiming the count-up
+	 * is one edit here rather than a literal buried in the component. Whether a change
+	 * may animate at all is a separate question, answered by `COUNT_UP_MS`.
+	 */
+	countUp: 240,
 	/** Per-item delay inside a staggered reveal, in milliseconds. */
 	stagger: 16,
 	/** Entrances and growth: leaves quickly, arrives softly. */
@@ -39,13 +47,20 @@ const MOTION = Object.freeze({
 /**
  * How long a user-initiated change keeps the headline count-up armed.
  *
- * This is the panel's one animation that writes React state on every frame, so it
- * is deliberately NOT opened by live data ticks: the render gate asserts that one
- * real usage change costs at most two renders. Every other animation is CSS and
- * replays whenever its own data changes.
+ * Distinct from `MOTION.countUp`, which is how long one count-up runs: this is the
+ * window during which a further change is still treated as user-initiated. It is
+ * the panel's one animation that writes React state on every frame, so it is
+ * deliberately NOT opened by live data ticks: the render gate asserts that one real
+ * usage change costs at most two renders.
  */
 const COUNT_UP_MS = 320;
-/** Row count above which the table renders only the visible window. */
+/**
+ * Row count above which the table renders only the visible window.
+ *
+ * Unreachable today — pagination caps a page at `PAGE_SIZE` rows, well under this
+ * threshold — but kept as the guard for the windowing math rather than removed, as
+ * `README.md` documents.
+ */
 const VIRTUALIZATION_THRESHOLD = 100;
 /** Extra rows rendered above and below the viewport (mirrors ui-trajectory). */
 const VIRTUAL_OVERSCAN_ROWS = 12;
@@ -78,8 +93,9 @@ const HEATMAP_WEEKS = 53;
  * properties rather than literal hex. SVG `stroke`/`fill` accept a `var()`
  * reference, so naming them lets the stylesheet substitute a light-theme set: every
  * literal here scores only 1.88-3.09:1 against white, which is unusable for the
- * thin strokes and small donut arcs they paint. The defaults in `50-css.js` are
- * the originals, tuned for the dark surface.
+ * thin strokes and small donut arcs they paint. The originals, tuned for the dark
+ * surface, are the `--dsh-tup-c*` / `--dsh-tup-other` / `--dsh-tup-heat` defaults in
+ * the emitted stylesheet (`src/50-css.js`, which ships only inside `lib/client.js`).
  */
 const MODEL_COLORS = [
 	"var(--dsh-tup-c1)",

@@ -145,3 +145,16 @@ function csvField(value) {
 function clamp(value, low, high) {
 	return value < low ? low : value > high ? high : value;
 }
+
+/**
+ * Clamp a dragged column width to the table's bounds.
+ *
+ * The floor keeps a numeric column readable and the ceiling keeps one column from
+ * starving the rest; both the drag handler and the persisted-filter validator need
+ * the same two bounds, so they share this rather than repeating the pair.
+ * @param width - the candidate pixel width.
+ * @returns the width within `COLUMN_WIDTH_LIMITS`.
+ */
+function clampColumnWidth(width) {
+	return clamp(width, COLUMN_WIDTH_LIMITS.min, COLUMN_WIDTH_LIMITS.max);
+}

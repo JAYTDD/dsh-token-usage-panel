@@ -317,10 +317,7 @@ function TokenUsagePanel(props) {
 				resizeRef.current = null;
 				return;
 			}
-			const width = Math.min(
-				COLUMN_WIDTH_LIMITS.max,
-				Math.max(COLUMN_WIDTH_LIMITS.min, drag.startWidth + (clientX - drag.startX)),
-			);
+			const width = clampColumnWidth(drag.startWidth + (clientX - drag.startX));
 			updateFilters((previous) =>
 				previous.columnWidths[key] === width ? previous : { ...previous, columnWidths: { ...previous.columnWidths, [key]: width } },
 			);

@@ -41,7 +41,7 @@ function normalizeFilters(value) {
 		for (const [key, width] of Object.entries(value.columnWidths)) {
 			if (!known.has(key)) continue;
 			if (typeof width !== "number" || !Number.isFinite(width)) continue;
-			next.columnWidths[key] = Math.min(COLUMN_WIDTH_LIMITS.max, Math.max(COLUMN_WIDTH_LIMITS.min, Math.round(width)));
+			next.columnWidths[key] = clampColumnWidth(Math.round(width));
 		}
 	}
 	return next;

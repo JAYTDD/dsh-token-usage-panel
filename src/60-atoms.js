@@ -30,7 +30,7 @@ function useCountUp(value, animate) {
 		const started = (typeof performance !== "undefined" ? performance.now() : Date.now());
 		const step = () => {
 			const now = typeof performance !== "undefined" ? performance.now() : Date.now();
-			const progress = Math.min(1, (now - started) / 240);
+			const progress = Math.min(1, (now - started) / MOTION.countUp);
 			const eased = 1 - Math.pow(1 - progress, 3);
 			setDisplay(Math.round(from + (value - from) * eased));
 			if (progress < 1) frameRef.current = requestAnimationFrame(step);
@@ -473,10 +473,11 @@ function ModelBreakdown({ breakdown, onSelect, t }) {
 	// on whether the breakdown has data yet.
 	const [grouping, setGrouping] = react.useState("provider");
 	if (breakdown === undefined) return null;
-	const total = breakdown.routes.reduce((sum, route) => sum + totalOf(route.tokens), 0);
+	const total = totalOfRoutes(breakdown.routes);
 	const shareOf = (value) => formatShare(total > 0 ? value / total : 0);
-	const chip = (route) =>
-		h(
+	const chip = (route) => {
+		const tokens = totalOf(route.tokens);
+		return h(
 			"li",
 			{ key: routeIdOf(route), className: "dshTup_routeItem" },
 			h(
@@ -491,11 +492,12 @@ function ModelBreakdown({ breakdown, onSelect, t }) {
 					h("span", { key: "dot", className: "dshTup_dot", style: { background: routeColor(routeIdOf(route)) } }),
 					h("span", { key: "v", className: "dshTup_providerTag" }, route.providerName),
 					h("span", { key: "m", className: "dshTup_routeModel" }, route.modelName),
-					h("span", { key: "n", className: "dshTup_routeTokens" }, formatCompact(totalOf(route.tokens))),
-					h("span", { key: "p", className: "dshTup_routeShare" }, shareOf(totalOf(route.tokens))),
+					h("span", { key: "n", className: "dshTup_routeTokens" }, formatCompact(tokens)),
+					h("span", { key: "p", className: "dshTup_routeShare" }, shareOf(tokens)),
 				],
 			),
 		);
+	};
 	const groups = [];
 	if (grouping === "provider") {
 		const byProvider = new Map();

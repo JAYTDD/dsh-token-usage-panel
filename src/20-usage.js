@@ -69,6 +69,20 @@ function totalOf(usage) {
 }
 
 /**
+ * Total tokens across a breakdown's routes.
+ *
+ * The donut and the per-model band both need "how much did all these routes spend
+ * together", so the walk lives here rather than being respelled at each call site.
+ * @param routes - breakdown routes, each carrying a `tokens` usage value.
+ * @returns the summed total.
+ */
+function totalOfRoutes(routes) {
+	let total = 0;
+	for (const route of routes) total += totalOf(route.tokens);
+	return total;
+}
+
+/**
  * Sum normalized usage values.
  * @param values - usage values to add.
  * @returns the four summed counters.

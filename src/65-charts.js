@@ -18,6 +18,13 @@
 const TREND_SERIES_LIMIT = 5;
 /** Neutral colour for the merged "other" series, outside the route palette. */
 const OTHER_COLOR = "var(--dsh-tup-other)";
+/**
+ * The id of the merged "other" series.
+ *
+ * It is not a real route id, but it travels as one — it keys the series list and
+ * becomes a React key — so it is named here rather than repeated as a literal.
+ */
+const OTHER_SERIES_ID = "__other__";
 
 /**
  * A stable colour for one route, so the same model keeps its colour across the
@@ -71,47 +78,50 @@ function trendSeries(byDay, days, t) {
 	}
 	const ranked = [...totals.entries()].sort((left, right) => right[1] - left[1]);
 	const kept = ranked.slice(0, TREND_SERIES_LIMIT).map(([id]) => id);
+	const keptSet = new Set(kept);
 	const series = [];
 	for (const id of kept) {
-		const label = labelOfRoute(byDay, days, id);
-		series.push({ id, label, color: routeColor(id), values: seriesValues(byDay, days, id) });
+		const { values, label } = seriesOfRoute(byDay, days, id);
+		series.push({ id, label, color: routeColor(id), values });
 	}
 	if (ranked.length > kept.length) {
+		// The merged bucket is the complement of `kept`, so it is derived from the same
+		// totals map in one pass rather than re-walking every bucket's rows.
 		const values = new Map();
 		for (const day of days) {
 			const bucket = byDay.get(day);
 			if (bucket === undefined) continue;
 			let total = 0;
 			for (const [id, row] of bucket) {
-				if (kept.includes(id)) continue;
+				if (keptSet.has(id)) continue;
 				total += totalOf(row.tokens);
 			}
 			if (total > 0) values.set(day, total);
 		}
-		series.push({ id: "__other__", label: t("models.other"), color: OTHER_COLOR, values });
+		series.push({ id: OTHER_SERIES_ID, label: t("models.other"), color: OTHER_COLOR, values });
 	}
 	return { series };
 }
 
-/** The per-day totals of one route over a window. */
-function seriesValues(byDay, days, id) {
+/**
+ * One route as the trend needs it: its per-day totals over the window, and its
+ * display label taken from the first day that carries it.
+ * @param byDay - the merged per-day per-model calendars.
+ * @param days - the day indices in the window, ascending.
+ * @param id - the route id.
+ * @returns `{ values, label }`; `label` falls back to the id when unseen.
+ */
+function seriesOfRoute(byDay, days, id) {
 	const values = new Map();
+	let label;
 	for (const day of days) {
 		const row = byDay.get(day)?.get(id);
 		if (row === undefined) continue;
+		if (label === undefined) label = routeLabel(row);
 		const total = totalOf(row.tokens);
 		if (total > 0) values.set(day, total);
 	}
-	return values;
-}
-
-/** The display label of one route found anywhere in the window. */
-function labelOfRoute(byDay, days, id) {
-	for (const day of days) {
-		const row = byDay.get(day)?.get(id);
-		if (row !== undefined) return routeLabel(row);
-	}
-	return id;
+	return { values, label: label ?? id };
 }
 //#endregion
 
@@ -214,8 +224,12 @@ function ActivityHeatmap({ byDay, offsetMinutes, today, t, extra, onSelectDay })
 				// cells are interactive the SVG is a group instead, and the figure's
 				// summary lives in the text paragraph below it; with nothing to select it
 				// really is just a picture, and stays announced as one.
+				//
+				// The group is left unnamed on purpose: `summary` already renders in the
+				// paragraph below, and an `aria-label` here would announce the same
+				// sentence twice when entering the grid.
 				role: selectable ? "group" : "img",
-				"aria-label": summary,
+				"aria-label": selectable ? undefined : summary,
 			},
 			[
 				months.map((month) =>
@@ -531,7 +545,7 @@ const DONUT = { size: 190, radius: 68, stroke: 26 };
  * @returns the card.
  */
 function ModelDonut({ routes, t, onSelect, extra }) {
-	const total = routes.reduce((sum, route) => sum + totalOf(route.tokens), 0);
+	const total = totalOfRoutes(routes);
 	const center = DONUT.size / 2;
 	const circumference = 2 * Math.PI * DONUT.radius;
 	let offset = 0;
