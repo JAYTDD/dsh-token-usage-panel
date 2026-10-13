@@ -16,6 +16,11 @@ const FILTER_KEY = "dsh-token-usage-panel.filters.v3";
  * filters or restoring a saved view cannot clear a budget.
  */
 const THRESHOLD_KEY = "dsh-token-usage-panel.thresholds.v1";
+/**
+ * Which threshold crossings already posted a system notification today.
+ * Keys reset when the Host day index changes, so one crossing beeps once.
+ */
+const NOTIFIED_KEY = "dsh-token-usage-panel.notified.v1";
 /** Days of `tokenUsageByRouteByDay` the Host retains; the client uses this to detect coverage gaps. */
 const ROUTE_DAY_RETENTION = 90;
 /** Cap on named filter views stored beside the live filters. */

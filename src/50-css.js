@@ -27,6 +27,8 @@ const css = [
 	// motion tokens are repeated from `MOTION` only as the fallback for a stylesheet
 	// rendered without the panel's inline properties.
 	".dshTup_root{height:100%;min-height:0;box-sizing:border-box;display:flex;flex-direction:column;overflow:hidden;container-type:inline-size;background:var(--dsw-alias-bg-base);color:var(--dsw-alias-label-primary);font-size:var(--dsh-tup-fs-base);line-height:1.5;--dsh-tup-row-h:54px;--dsh-tup-hairline:.5px;--dsh-tup-fs-base:14px;--dsh-tup-fs-2xs:11px;--dsh-tup-fs-xs:12px;--dsh-tup-fs-sm:13px;--dsh-tup-fs-lg:15px;--dsh-tup-fs-xl:20px;--dsh-tup-fs-2xl:28px;--dsh-tup-fs-hero:44px;--dsh-tup-sp-1:4px;--dsh-tup-sp-2:8px;--dsh-tup-sp-3:12px;--dsh-tup-sp-4:16px;--dsh-tup-sp-5:24px;--dsh-tup-sp-6:32px;--dsh-tup-fast:140ms;--dsh-tup-base:220ms;--dsh-tup-slow:460ms;--dsh-tup-stagger:16ms;--dsh-tup-ease:cubic-bezier(.22,.61,.36,1);--dsh-tup-settle:cubic-bezier(.16,1,.3,1)}",
+	".dshTup_navIcon{position:relative;display:inline-flex;align-items:center;justify-content:center}",
+	".dshTup_navBadge{position:absolute;top:-2px;right:-2px;width:8px;height:8px;border-radius:999px;background:var(--dsw-alias-state-warn-primary);box-shadow:0 0 0 2px var(--dsw-alias-bg-base);pointer-events:none}",
 	// The motion vocabulary. Every wave — bands, table rows, heatmap columns — is
 	// `index * --dsh-tup-stagger`, and every curve is one of the two easing tokens, so
 	// the panel is retimed from `MOTION` in `05-constants.js`; the values in the root
@@ -70,6 +72,7 @@ const css = [
 	// margin-left:auto keeps the wrapped action row right-aligned under the title
 	// instead of dropping to the far left when the head wraps on a narrow pane.
 	".dshTup_actions{display:flex;align-items:center;gap:var(--dsh-tup-sp-2);flex:none;margin-left:auto}",
+	".dshTup_root .dshTup_thresholdBtn,.dshTup_root .dshTup_actions button{flex:none;max-width:none;overflow:visible;white-space:nowrap}",
 	// A flat band: no border, no fill, no radius. It is separated from what follows by
 	// one hairline and from what precedes it by the view's own gap, so the page reads
 	// as one surface instead of a column of boxes.

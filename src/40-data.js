@@ -146,6 +146,23 @@ function useProjectedSessions(store, attempts, epoch) {
 	}, [store, attempts, epoch]);
 	return react.useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
 }
+
+/**
+ * Project the current list snapshot into rows without React.
+ * Used by the always-on threshold watcher, which must run while the panel is closed.
+ * @param snapshot - `ctx.sessions.list` snapshot.
+ * @returns projected rows.
+ */
+function rowsFromSnapshot(snapshot) {
+	const rows = [];
+	if (snapshot === null || snapshot === undefined || !Array.isArray(snapshot.ids)) return rows;
+	const attempts = new Map();
+	for (const id of snapshot.ids) {
+		const row = rowInputOf(snapshot, id, attempts, undefined);
+		if (row !== undefined) rows.push(row);
+	}
+	return rows;
+}
 //#endregion
 
 //#region display cache

@@ -10,6 +10,7 @@ function apply(ctx) {
 	// Rows cache formatted labels, and those follow the active locale: drop the
 	// cache whenever a dictionary or the preference changes.
 	ctx.effect(() => ctx.locale.subscribe(() => clearDisplayCache()), "dsh-token-usage-panel: locale cache");
+	ctx.effect(() => startThresholdWatch(ctx.sessions.list, ctx.locale.bind(NS)), "dsh-token-usage-panel: threshold watch");
 	const openSession = (id) => {
 		ctx.uiWorkspace.openSession(id);
 	};

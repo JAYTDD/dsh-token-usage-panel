@@ -34,6 +34,7 @@ const root = join(here, '..')
 const bundlePath = join(root, 'lib', 'client.js')
 const FILTER_KEY = 'dsh-token-usage-panel.filters.v3'
 const THRESHOLD_KEY = 'dsh-token-usage-panel.thresholds.v1'
+const NOTIFIED_KEY = 'dsh-token-usage-panel.notified.v1'
 const LEGACY_KEYS = ['dsh-token-usage-panel.filters.v1', 'dsh-token-usage-panel.filters.v2']
 const DAY = 86400000
 
@@ -346,6 +347,8 @@ const sandbox = {
   },
   window: {
     __ModuleLoader__: { load: (entry) => { sandbox.__entry = entry } },
+    addEventListener: () => undefined,
+    removeEventListener: () => undefined,
     localStorage: {
       getItem: (key) => (stored.has(key) ? stored.get(key) : null),
       setItem: (key, value) => stored.set(key, String(value)),
@@ -447,6 +450,13 @@ check(
 )
 check(source.includes('dshTup_rowMetaPart') && source.includes('dshTup_rowFamily'), 'session rows split scan metadata and family context into dedicated elements')
 check(source.includes('function efficiencyOf'), 'the bundle derives cache and output composition ratios from the four token buckets')
+check(
+  css.includes('.dshTup_navBadge') &&
+    css.includes('.dshTup_navIcon') &&
+    source.includes('startThresholdWatch') &&
+    source.includes('new Notification'),
+  'threshold crossings can badge the sidebar and post a system notification',
+)
 check(source.includes('function anomaliesOf'), 'the bundle derives anomaly days from a preceding active-day median')
 check(
   ruleOf('.dshTup_trendWrap').includes('overscroll-behavior-x:contain') &&
@@ -2067,6 +2077,7 @@ console.log('# local token thresholds')
   const localeEn = registeredLocales.tokenUsage?.en ?? {}
   const keys = [
     'threshold.settings',
+    'threshold.settingsShort',
     'threshold.day',
     'threshold.week',
     'threshold.session',
@@ -2081,6 +2092,13 @@ console.log('# local token thresholds')
   check(
     keys.every((key) => typeof localeZh[key] === 'string' && typeof localeEn[key] === 'string'),
     'threshold strings exist in both dictionaries',
+  )
+  check(
+    !localeZh['threshold.settings'].includes('…') &&
+      !localeZh['threshold.settingsShort'].includes('…') &&
+      localeZh['threshold.settingsShort'].length < localeZh['threshold.settings'].length &&
+      source.includes('threshold.settingsShort'),
+    'the header uses a short threshold label without a baked-in ellipsis',
   )
   check(
     keys.every((key) => typeof localeZh[key] === 'string' && typeof localeEn[key] === 'string' && !localeZh[key].includes('$') && !localeEn[key].includes('$')),
@@ -2154,7 +2172,7 @@ console.log('# local token thresholds')
     await settle()
   }
   check(JSON.parse(stored.get(THRESHOLD_KEY) ?? '{}').day === 1, 'saving writes a positive day threshold')
-  check(text().includes('threshold.dayOver'), 'saving a crossed threshold shows the warning without a background notification')
+  check(text().includes('threshold.dayOver'), 'saving a crossed threshold shows the in-panel warning')
   check(JSON.parse(stored.get(FILTER_KEY)).day === null || JSON.parse(stored.get(FILTER_KEY)).range !== undefined, 'saving thresholds does not replace the filters blob')
   await pickMenu('filter.more', 'reset')
   check(JSON.parse(stored.get(THRESHOLD_KEY) ?? '{}').day === 1, 'resetting filters keeps the threshold config')
@@ -2182,6 +2200,35 @@ console.log('# local token thresholds')
   runtime.restart()
   render()
   await settle()
+}
+
+console.log('# system threshold notifications')
+{
+  const notices = []
+  const FakeNotification = function FakeNotification(title, options) {
+    notices.push({ title, body: options === undefined ? undefined : options.body, tag: options === undefined ? undefined : options.tag })
+  }
+  FakeNotification.permission = 'granted'
+  FakeNotification.requestPermission = () => {
+    FakeNotification.permission = 'granted'
+    return Promise.resolve('granted')
+  }
+  sandbox.Notification = FakeNotification
+  sandbox.window.Notification = FakeNotification
+  stored.delete(NOTIFIED_KEY)
+  stored.set(THRESHOLD_KEY, JSON.stringify({ day: 1, week: null, session: null }))
+  notices.length = 0
+  listStore.push(listStore.getSnapshot())
+  check(notices.length === 1, 'a day-threshold crossing posts one system notification (' + notices.length + ')')
+  check(notices[0] !== undefined && notices[0].tag === 'dsh-tup-threshold', 'the system notification reuses one OS tag')
+  listStore.push(listStore.getSnapshot())
+  check(notices.length === 1, 'the same crossing is not posted twice on the same Host day')
+  check(iconReg.component !== undefined && source.includes('dshTup_navBadge'), 'the sidebar icon can render a warning dot')
+  stored.delete(THRESHOLD_KEY)
+  stored.delete(NOTIFIED_KEY)
+  listStore.push(listStore.getSnapshot())
+  sandbox.Notification = undefined
+  sandbox.window.Notification = undefined
 }
 
 console.log('# 90-day route-by-day coverage')

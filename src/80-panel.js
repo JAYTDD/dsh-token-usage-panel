@@ -414,7 +414,10 @@ function TokenUsagePanel(props) {
 		if (next === undefined) return;
 		setThresholds(next);
 		setThresholdOpen(false);
-	}, [thresholdDraft]);
+		if (next.day !== null || next.week !== null || next.session !== null) {
+			void requestThresholdNotifications().then(() => evaluateThresholdWatch(store, t));
+		}
+	}, [thresholdDraft, store, t]);
 
 	/**
 	 * One drag, tracked across the three pointer phases.
@@ -603,10 +606,12 @@ function TokenUsagePanel(props) {
 				Button,
 				{
 					key: "thresholds",
+					className: "dshTup_thresholdBtn",
 					variant: "outline",
+					title: t("threshold.settings"),
 					onClick: openThresholdEditor,
 				},
-				t("threshold.settings"),
+				t("threshold.settingsShort"),
 			),
 			h(
 				Button,

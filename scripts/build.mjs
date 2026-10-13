@@ -40,6 +40,7 @@ export const MODULES = [
   '30-filters.js',
   '32-thresholds.js',
   '40-data.js',
+  '41-threshold-watch.js',
   '42-tree.js',
   '45-audit.js',
   '50-css.js',

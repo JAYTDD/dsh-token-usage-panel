@@ -1,7 +1,10 @@
 /**
- * Soft token thresholds: a local, no-money budget the panel checks when it
- * opens or refreshes. Stored beside the filters, never inside them, so reset
- * and saved views cannot clear a budget. There is no background notification.
+ * Soft token thresholds: a local, no-money budget.
+ *
+ * Stored beside the filters, never inside them, so reset and saved views
+ * cannot clear a budget. A watcher started from `apply` reads this blob even
+ * when the panel is closed, so a crossing can badge the sidebar and post a
+ * system notification while the user is in a chat.
  */
 function freshThresholds() {
 	return { day: null, week: null, session: null };
@@ -45,6 +48,8 @@ function loadThresholds() {
 	}
 }
 
+const thresholdSaveListeners = new Set();
+
 /** Persist the thresholds; a failure only loses the preference. */
 function saveThresholds(thresholds) {
 	try {
@@ -52,6 +57,19 @@ function saveThresholds(thresholds) {
 	} catch {
 		/* private mode or quota: the panel keeps working without persistence */
 	}
+	for (const notify of [...thresholdSaveListeners]) notify();
+}
+
+/**
+ * Subscribe to local saves of the threshold blob.
+ * Same-tab `localStorage` writes do not fire `storage`, so the watcher
+ * has to hear this instead of relying on the window event.
+ * @param notify - called after each successful or attempted save.
+ * @returns an unsubscribe function.
+ */
+function subscribeThresholdSaves(notify) {
+	thresholdSaveListeners.add(notify);
+	return () => thresholdSaveListeners.delete(notify);
 }
 
 /**

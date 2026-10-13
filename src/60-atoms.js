@@ -45,7 +45,11 @@ function useCountUp(value, animate) {
 //#region atoms
 /** Sidebar row glyph, matching the shipped global-panel entries' convention. */
 function TokenUsageIcon({ size }) {
-	return h(IconDatabaseOutlineRegular, { size });
+	const armed = react.useSyncExternalStore(subscribeThresholdBadge, thresholdBadgeSnapshot, thresholdBadgeSnapshot);
+	return h("span", { className: "dshTup_navIcon", "data-alert": armed ? "true" : undefined }, [
+		h(IconDatabaseOutlineRegular, { key: "i", size }),
+		armed ? h("span", { key: "b", className: "dshTup_navBadge", "aria-hidden": "true" }) : null,
+	]);
 }
 
 /**
