@@ -63,6 +63,21 @@ function billedInput(usage) {
 	return usage.uncachedInputTokens + usage.cacheReadTokens + usage.cacheWriteTokens;
 }
 
+/**
+ * Readable token-composition ratios. These describe the recorded token buckets,
+ * not provider-side request cache hit rates.
+ */
+function efficiencyOf(usage) {
+	const input = billedInput(usage);
+	const total = totalOf(usage);
+	return {
+		input,
+		cacheReadRate: input > 0 ? usage.cacheReadTokens / input : 0,
+		cacheWriteRate: input > 0 ? usage.cacheWriteTokens / input : 0,
+		outputRate: total > 0 ? usage.outputTokens / total : 0,
+	};
+}
+
 /** Total tokens billed for one usage value. */
 function totalOf(usage) {
 	return billedInput(usage) + usage.outputTokens;

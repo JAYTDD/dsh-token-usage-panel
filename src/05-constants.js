@@ -12,6 +12,17 @@ const LOAD_CONCURRENCY = 3;
  */
 const FILTER_KEY = "dsh-token-usage-panel.filters.v3";
 /**
+ * Soft token-threshold persistence. Kept off the filters blob so resetting
+ * filters or restoring a saved view cannot clear a budget.
+ */
+const THRESHOLD_KEY = "dsh-token-usage-panel.thresholds.v1";
+/** Days of `tokenUsageByRouteByDay` the Host retains; the client uses this to detect coverage gaps. */
+const ROUTE_DAY_RETENTION = 90;
+/** Cap on named filter views stored beside the live filters. */
+const SAVED_VIEW_LIMIT = 5;
+/** Inclusive maximum length of a saved-view name, after trim. */
+const SAVED_VIEW_NAME_MAX = 32;
+/**
  * The panel's motion vocabulary: every duration and curve it uses, in one table.
  *
  * It is handed to the stylesheet as custom properties on the root
@@ -76,15 +87,22 @@ const SEGMENTS = [
 	{ key: "outputTokens", labelKey: "segment.output", color: "var(--dsw-alias-state-business-primary)" },
 ];
 /** Sortable measures; the dictionary names each one. */
-const SORT_KEYS = ["total", "input", "cacheRead", "cacheWrite", "output", "title", "recent"];
-/** Range filter values. */
-const RANGES = ["all", "today", "7d", "30d"];
+const SORT_KEYS = ["total", "input", "cacheRead", "cacheReadRate", "cacheWrite", "output", "title", "recent"];
+/** Range filter values. `today` is accepted only so a stored v3 value can be rewritten to `7d`. */
+const RANGES = ["all", "7d", "30d", "90d"];
+/** Range choices in the header, left to right. */
+const HEADER_RANGES = ["7d", "30d", "90d", "all"];
 /** The panel's two views: the charts, and the session table. */
 const VIEWS = ["overview", "sessions"];
-/** Trend chart windows, in days. */
+/** Trend chart windows, in days. Kept so a stored `trendDays` still normalizes. */
 const TREND_RANGES = [7, 30];
+/** Columns that stay off until the reader asks for the composition. */
+const BUCKET_COLUMN_KEYS = new Set(["share", "input", "cacheRead", "cacheWrite", "output"]);
 /** Weeks rendered by the activity grid (about a year, like the reference design). */
 const HEATMAP_WEEKS = 53;
+/** Calendar width before the wrapper is measured, and the narrowest it is drawn (it scrolls below this). */
+const HEATMAP_DEFAULT_WIDTH = 980;
+const HEATMAP_FLOOR = 560;
 /**
  * Palette for the per-model series.
  *
@@ -117,9 +135,9 @@ const MODEL_COLORS = [
  * that even the reduced column set would overflow.
  */
 const COLUMNS = [
-	{ key: "updated", labelKey: "col.updated", sortKey: "recent" },
 	{ key: "session", labelKey: "col.session", sortKey: "title", className: "dshTup_colSession" },
-	{ key: "total", labelKey: "col.total", sortKey: "total", hideBelow2: true },
+	{ key: "total", labelKey: "col.total", sortKey: "total" },
+	{ key: "updated", labelKey: "col.updated", sortKey: "recent" },
 	{ key: "share", labelKey: "col.share", hideBelow: true },
 	{ key: "input", labelKey: "col.input", sortKey: "input", hideBelow: true },
 	{ key: "cacheRead", labelKey: "col.cacheRead", sortKey: "cacheRead", hideBelow: true },
@@ -161,4 +179,11 @@ const DEFAULT_FILTERS = Object.freeze({
 	columnWidths: Object.freeze({}),
 	view: "overview",
 	trendDays: 7,
+	/** When true the table also renders share and the four billing buckets. */
+	showBuckets: false,
+	/**
+	 * Named snapshots of the live filters. Lives on the same blob so one write
+	 * path persists both; reset copies this array across rather than wiping it.
+	 */
+	savedViews: Object.freeze([]),
 });

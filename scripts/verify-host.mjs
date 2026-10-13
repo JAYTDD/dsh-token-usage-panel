@@ -234,6 +234,12 @@ console.log('# retention windows')
   const dayA = Math.floor(DAY_A / DAY)
   const longConfig = { utcOffsetMinutes: 0 }
   const [longRoute, longDay, longRouteDay] = createUsageProjections(longConfig, names)
+  check(internals.ROUTE_DAY_WINDOW === 90, 'per-day-per-model detail is retained for 90 days (' + internals.ROUTE_DAY_WINDOW + ')')
+  check(longRoute.stateVersion === 1 && longDay.stateVersion === 1, 'the unwindowed and per-day units stay on stateVersion 1')
+  check(
+    longRouteDay.key === 'tokenUsageByRouteByDay' && longRouteDay.stateVersion === 1,
+    'widening route-by-day retention does not bump stateVersion (no destructive checkpoint drop)',
+  )
   let longDayState = longDay.init({}, 0)
   let longRouteState = longRoute.init({}, 0)
   for (let offset = 0; offset < 400; offset += 1) {
@@ -246,10 +252,14 @@ console.log('# retention windows')
   check(longDayState.first === dayA * DAY + 1000, 'the span keeps the session start even after pruning')
   check(Object.keys(longRouteState.totals).length === 1, 'the per-model unit is not windowed by day')
   let longRouteDayState = longRouteDay.init({}, 0)
-  for (let offset = 0; offset < 40; offset += 1) {
+  for (let offset = 0; offset < 120; offset += 1) {
     longRouteDayState = longRouteDay.apply(longRouteDayState, message(offset, 1, usage(1, 1), (dayA + offset) * DAY + 1000))
   }
   check(Object.keys(longRouteDayState.days).length === internals.ROUTE_DAY_WINDOW, 'per-day-per-model detail keeps its shorter window (' + Object.keys(longRouteDayState.days).length + ')')
+  check(
+    Number(Object.keys(longRouteDayState.days)[0]) === dayA + 120 - internals.ROUTE_DAY_WINDOW,
+    'the oldest retained per-model day is the 90-day floor',
+  )
   // A gap wider than the window must still prune: the old early return skipped
   // it whenever the map held fewer keys than the window, so a sparse history
   // kept a day >366 days old (the streak and the peak read it; the calendar

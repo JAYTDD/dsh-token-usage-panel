@@ -170,29 +170,29 @@ function clearDisplayCache() {
  * @param t - translate seat.
  * @returns the cached display record.
  */
-function displayOf(row, t) {
-	const cached = displayCache.get(row);
-	if (cached !== undefined) return cached;
-	const usage = row.usage;
+function displayOf(row, t, usageOverride) {
+	if (usageOverride === undefined) {
+		const cached = displayCache.get(row);
+		if (cached !== undefined) return cached;
+	}
+	const usage = usageOverride !== undefined ? usageOverride : row.usage;
 	const total = usage === undefined ? undefined : totalOf(usage);
-	const meta = [];
+	const efficiency = usage === undefined ? undefined : efficiencyOf(usage);
 	const directory = leafName(row.cwd);
-	if (directory !== undefined) meta.push(directory);
-	if (row.stats !== undefined) meta.push(t("col.turns") + " " + formatInt(row.stats.turns));
-	if (total === undefined) meta.push(t("missing"));
-	else if (total === 0) meta.push(t("zero"));
-	meta.push(row.id);
 	const record = {
 		total: total === undefined ? t("never") : formatInt(total),
 		input: usage === undefined ? t("never") : formatInt(usage.uncachedInputTokens),
 		cacheRead: usage === undefined ? t("never") : formatInt(usage.cacheReadTokens),
 		cacheWrite: usage === undefined ? t("never") : formatInt(usage.cacheWriteTokens),
 		output: usage === undefined ? t("never") : formatInt(usage.outputTokens),
+		cacheReadRate: efficiency === undefined ? t("never") : formatShare(efficiency.cacheReadRate),
+		directory,
+		turns: row.stats === undefined ? undefined : t("col.turns") + " " + formatInt(row.stats.turns),
+		status: total === undefined ? t("missing") : total === 0 ? t("zero") : undefined,
 		updatedAt: formatTime(row.updatedAt),
-		tooltip: formatFullTime(row.updatedAt),
-		meta: meta.join(" · "),
+		tooltip: (row.title ?? t("unknownTitle")) + "\n" + row.id + "\n" + formatFullTime(row.updatedAt),
 	};
-	displayCache.set(row, record);
+	if (usageOverride === undefined) displayCache.set(row, record);
 	return record;
 }
 //#endregion
@@ -367,6 +367,364 @@ function peakOf(byDay) {
 	return peak;
 }
 
+/**
+ * Identify unusually high days from up to 28 preceding active days. A median
+ * resists one-off spikes, and seven samples are required before any day is
+ * labelled so a new installation does not manufacture anomalies.
+ */
+function anomaliesOf(byDay) {
+	const days = [...byDay.keys()].sort((left, right) => left - right);
+	const anomalies = new Map();
+	for (let index = 0; index < days.length; index += 1) {
+		const day = days[index];
+		const value = totalOf(byDay.get(day));
+		if (value <= 0) continue;
+		const samples = [];
+		for (let cursor = Math.max(0, index - 28); cursor < index; cursor += 1) {
+			const candidate = totalOf(byDay.get(days[cursor]));
+			if (candidate > 0) samples.push(candidate);
+		}
+		if (samples.length < 7) continue;
+		samples.sort((left, right) => left - right);
+		const middle = Math.floor(samples.length / 2);
+		const median = samples.length % 2 === 0 ? (samples[middle - 1] + samples[middle]) / 2 : samples[middle];
+		if (median > 0 && value >= median * 2) anomalies.set(day, { value, median });
+	}
+	return anomalies;
+}
+
+/**
+ * The Host UTC offset carried by the first row that has one.
+ * @param rows - projected rows.
+ * @returns minutes east of UTC, or 0 when none of the rows know.
+ */
+function hostOffsetMinutes(rows) {
+	for (const row of rows) {
+		const value = row.dayUsage;
+		if (value === undefined) continue;
+		if (typeof value.offsetMinutes === "number" && Number.isFinite(value.offsetMinutes)) return value.offsetMinutes;
+	}
+	return 0;
+}
+
+/**
+ * The inclusive Host-day window a range names, or null for lifetime (`all`).
+ * @param range - `all` | `7d` | `30d` | `90d`.
+ * @param today - the Host's current day index.
+ * @returns `{ fromDay, toDay }` or null.
+ */
+function usageWindowOf(range, today) {
+	if (range === "7d") return { fromDay: today - 6, toDay: today };
+	if (range === "30d") return { fromDay: today - 29, toDay: today };
+	if (range === "90d") return { fromDay: today - (ROUTE_DAY_RETENTION - 1), toDay: today };
+	return null;
+}
+
+/**
+ * The equal-length window immediately before `window`.
+ * @param window - `{ fromDay, toDay }`.
+ * @returns the previous window, or null when there is no current one.
+ */
+function previousUsageWindow(window) {
+	if (window === null || window === undefined) return null;
+	const span = window.toDay - window.fromDay + 1;
+	return { fromDay: window.fromDay - span, toDay: window.fromDay - 1 };
+}
+
+/**
+ * One row's token buckets inside an inclusive day span.
+ * @param row - projected row.
+ * @param fromDay - inclusive start.
+ * @param toDay - inclusive end.
+ * @returns the summed buckets, or undefined when the row has no day breakdown.
+ */
+function usageInWindow(row, fromDay, toDay) {
+	const days = row.dayUsage === undefined ? undefined : row.dayUsage.days;
+	if (days === undefined) return undefined;
+	const total = zeroUsage();
+	for (const entry of days) {
+		if (entry.day < fromDay || entry.day > toDay) continue;
+		addInto(total, entry.tokens);
+	}
+	return total;
+}
+
+/**
+ * Whether a row spent any tokens inside an inclusive day span.
+ * @param row - projected row.
+ * @param fromDay - inclusive start.
+ * @param toDay - inclusive end.
+ * @returns true when at least one day in the span has a positive total.
+ */
+function rowHasUsageInWindow(row, fromDay, toDay) {
+	const days = row.dayUsage === undefined ? undefined : row.dayUsage.days;
+	if (days === undefined) return false;
+	for (const entry of days) {
+		if (entry.day < fromDay || entry.day > toDay) continue;
+		if (totalOf(entry.tokens) > 0) return true;
+	}
+	return false;
+}
+
+/**
+ * Sum usage over rows. With a window, each row contributes its day buckets in
+ * that span; without one, each row contributes its lifetime `tokenUsage`.
+ * @param rows - projected rows.
+ * @param fromDay - inclusive start, or null/undefined for lifetime.
+ * @param toDay - inclusive end, or null/undefined for lifetime.
+ * @returns the four summed counters.
+ */
+function sumUsageInWindow(rows, fromDay, toDay) {
+	if (fromDay === null || fromDay === undefined || toDay === null || toDay === undefined) {
+		return sumUsages(rows.map((row) => row.usage ?? ZERO_USAGE));
+	}
+	const total = zeroUsage();
+	for (const row of rows) {
+		const usage = usageInWindow(row, fromDay, toDay);
+		if (usage === undefined) continue;
+		addInto(total, usage);
+	}
+	return total;
+}
+
+/**
+ * Sum the calendar's per-day totals over an inclusive span.
+ * @param byDay - day index → tokens.
+ * @param fromDay - inclusive start.
+ * @param toDay - inclusive end.
+ * @returns the summed total.
+ */
+function sumDaysBetween(byDay, fromDay, toDay) {
+	let total = 0;
+	for (let day = fromDay; day <= toDay; day += 1) {
+		const tokens = byDay.get(day);
+		if (tokens === undefined) continue;
+		total += totalOf(tokens);
+	}
+	return total;
+}
+
+/**
+ * The day indices the trend draws for a range.
+ *
+ * `7d` / `30d` / `90d` are a trailing window ending today. `all` runs from the
+ * earliest day that has usage to today, capped at 366.
+ *
+ * @param range - `all` | `7d` | `30d` | `90d`.
+ * @param today - the Host's current day index.
+ * @param byDay - day index → tokens.
+ * @returns the day indices, ascending.
+ */
+function trendDaysOf(range, today, byDay) {
+	if (range === "7d") return rangeDays(today, 7);
+	if (range === "30d") return rangeDays(today, 30);
+	if (range === "90d") return rangeDays(today, ROUTE_DAY_RETENTION);
+	let first = today;
+	let any = false;
+	for (const [day, tokens] of byDay) {
+		if (totalOf(tokens) <= 0) continue;
+		any = true;
+		if (day < first) first = day;
+	}
+	if (!any) return rangeDays(today, 1);
+	return rangeDays(today, Math.min(366, Math.max(1, today - first + 1)));
+}
+
+/**
+ * Per-day totals over a window, for the single trend line.
+ * @param byDay - day index → tokens.
+ * @param days - the day indices in the window, ascending.
+ * @returns day → total.
+ */
+function totalsByDay(byDay, days) {
+	const values = new Map();
+	for (const day of days) {
+		const tokens = byDay.get(day);
+		if (tokens === undefined) continue;
+		const total = totalOf(tokens);
+		if (total > 0) values.set(day, total);
+	}
+	return values;
+}
+
+/**
+ * Merge per-model usage. With a window this walks `tokenUsageByRouteByDay`;
+ * without one it uses the lifetime `tokenUsageByRoute` breakdown.
+ * @param rows - projected rows.
+ * @param fromDay - inclusive start, or null/undefined for lifetime.
+ * @param toDay - inclusive end, or null/undefined for lifetime.
+ * @returns `{ routes }` or undefined when nothing has model data.
+ */
+function aggregateRoutesInWindow(rows, fromDay, toDay) {
+	if (fromDay === null || fromDay === undefined || toDay === null || toDay === undefined) return aggregateRoutes(rows);
+	const merged = new Map();
+	for (const row of rows) {
+		const value = row.routeDayUsage;
+		if (value === undefined) continue;
+		for (const day of value.days) {
+			if (day.day < fromDay || day.day > toDay) continue;
+			for (const route of day.routes) {
+				if (totalOf(route.tokens) <= 0) continue;
+				const key = routeIdOf(route);
+				let entry = merged.get(key);
+				if (entry === undefined) {
+					entry = {
+						provider: route.provider,
+						model: route.model,
+						providerName: route.providerName,
+						modelName: route.modelName,
+						tokens: zeroUsage(),
+					};
+					merged.set(key, entry);
+				}
+				addInto(entry.tokens, route.tokens);
+			}
+		}
+	}
+	if (merged.size === 0) return undefined;
+	const routes = [...merged.values()];
+	routes.sort((left, right) => totalOf(right.tokens) - totalOf(left.tokens) || left.model.localeCompare(right.model));
+	return { routes };
+}
+
+/**
+ * Whether this row's per-model-by-day window is missing a day that the per-day
+ * totals still have, inside the Host retention span.
+ *
+ * Old checkpoints were pruned at 31 days. After the window grew to 90 those
+ * days stay absent until a projection refresh rebuilds them; treating the
+ * truncated block as complete would under-count model hover and the 90-day
+ * rank. Missing units are a different case (`needsRead` already queues those).
+ *
+ * @param row - projected row.
+ * @param today - the Host's current day index.
+ * @returns true when a billed day in the retention window has no route-by-day row.
+ */
+function routeDayCoverageGap(row, today) {
+	const dayUsage = row.dayUsage;
+	const routeDay = row.routeDayUsage;
+	if (dayUsage === undefined || routeDay === undefined) return false;
+	const from = today - (ROUTE_DAY_RETENTION - 1);
+	const covered = new Set();
+	for (const entry of routeDay.days) covered.add(entry.day);
+	for (const entry of dayUsage.days) {
+		if (entry.day < from || entry.day > today) continue;
+		if (totalOf(entry.tokens) <= 0) continue;
+		if (!covered.has(entry.day)) return true;
+	}
+	return false;
+}
+
+/**
+ * How many days in an inclusive span have token totals but no per-model detail.
+ * @param rows - projected rows.
+ * @param fromDay - inclusive start.
+ * @param toDay - inclusive end.
+ * @returns the number of uncovered days.
+ */
+function routeDayCoverageMissing(rows, fromDay, toDay) {
+	if (fromDay === null || fromDay === undefined || toDay === null || toDay === undefined) return 0;
+	const daysWithUsage = new Set();
+	const daysWithRoutes = new Set();
+	for (const row of rows) {
+		if (row.dayUsage !== undefined) {
+			for (const entry of row.dayUsage.days) {
+				if (entry.day < fromDay || entry.day > toDay) continue;
+				if (totalOf(entry.tokens) > 0) daysWithUsage.add(entry.day);
+			}
+		}
+		if (row.routeDayUsage !== undefined) {
+			for (const entry of row.routeDayUsage.days) {
+				if (entry.day < fromDay || entry.day > toDay) continue;
+				if (entry.routes.some((route) => totalOf(route.tokens) > 0)) daysWithRoutes.add(entry.day);
+			}
+		}
+	}
+	let missing = 0;
+	for (const day of daysWithUsage) if (!daysWithRoutes.has(day)) missing += 1;
+	return missing;
+}
+
+/** Header cells for the four billing buckets plus the total, in export order. */
+function exportBucketHeader(t) {
+	return [t("col.input"), t("col.cacheRead"), t("col.cacheWrite"), t("col.output"), t("col.total")];
+}
+
+/** Raw bucket integers (or blanks) matching `exportBucketHeader`. */
+function exportBucketCells(usage) {
+	if (usage === undefined) return ["", "", "", "", ""];
+	return [usage.uncachedInputTokens, usage.cacheReadTokens, usage.cacheWriteTokens, usage.outputTokens, totalOf(usage)];
+}
+
+/**
+ * Session export: every matched row (tree order, including collapsed children),
+ * always with the four raw buckets. Independent of `showBuckets`.
+ * @param nodes - `flattenAll` result.
+ * @param fromDay - inclusive start, or undefined for lifetime.
+ * @param toDay - inclusive end, or undefined for lifetime.
+ * @param t - translate seat.
+ * @returns `string[][]` including a header row.
+ */
+function exportSessionLines(nodes, fromDay, toDay, t) {
+	const lines = [[t("col.session"), t("col.id"), t("col.updated"), ...exportBucketHeader(t)]];
+	for (const node of nodes) {
+		const row = node.row;
+		const usage = fromDay === undefined || toDay === undefined ? row.usage : usageInWindow(row, fromDay, toDay);
+		const updated = typeof row.updatedAt === "number" && Number.isFinite(row.updatedAt) && row.updatedAt > 0 ? new Date(row.updatedAt).toISOString() : "";
+		lines.push([row.title !== undefined && row.title !== "" ? row.title : t("unknownTitle"), row.id, updated, ...exportBucketCells(usage)]);
+	}
+	return lines;
+}
+
+/**
+ * Daily export of the current filtered set in the current window.
+ * `all` emits every calendar day that has usage.
+ * @param rows - filtered rows.
+ * @param fromDay - inclusive start, or undefined for lifetime.
+ * @param toDay - inclusive end, or undefined for lifetime.
+ * @param offsetMinutes - Host UTC offset, for ISO dates.
+ * @param t - translate seat.
+ * @returns `string[][]` including a header row.
+ */
+function exportDayLines(rows, fromDay, toDay, offsetMinutes, t) {
+	const calendar = aggregateDays(rows);
+	const lines = [[t("export.col.date"), ...exportBucketHeader(t)]];
+	const days = [];
+	if (fromDay === undefined || toDay === undefined) {
+		for (const [day, tokens] of calendar.byDay) {
+			if (totalOf(tokens) > 0) days.push(day);
+		}
+		days.sort((left, right) => left - right);
+	} else {
+		for (let day = fromDay; day <= toDay; day += 1) {
+			const tokens = calendar.byDay.get(day);
+			if (tokens === undefined || totalOf(tokens) <= 0) continue;
+			days.push(day);
+		}
+	}
+	for (const day of days) lines.push([formatDayIso(day, offsetMinutes), ...exportBucketCells(calendar.byDay.get(day))]);
+	return lines;
+}
+
+/**
+ * Per-model export of the current filtered set in the current window.
+ * `all` uses lifetime `tokenUsageByRoute`, never a fake year of route-by-day.
+ * @param rows - filtered rows.
+ * @param fromDay - inclusive start, or undefined for lifetime.
+ * @param toDay - inclusive end, or undefined for lifetime.
+ * @param t - translate seat.
+ * @returns `string[][]` including a header row.
+ */
+function exportModelLines(rows, fromDay, toDay, t) {
+	const breakdown = aggregateRoutesInWindow(rows, fromDay, toDay);
+	const lines = [[t("export.col.provider"), t("export.col.model"), t("filter.model"), ...exportBucketHeader(t)]];
+	if (breakdown === undefined) return lines;
+	for (const route of breakdown.routes) {
+		lines.push([route.provider, route.model, routeLabel(route), ...exportBucketCells(route.tokens)]);
+	}
+	return lines;
+}
+
 //#endregion
 
 //#region read queue
@@ -426,14 +784,15 @@ function useUsageRows(sessions, store) {
 	 * @param row - the projected row.
 	 * @returns true when any value the panel displays is absent.
 	 */
-	const needsRead = (row) => {
+	const needsRead = (row, today) => {
 		if (row.blank) return false;
 		if (row.usage === undefined) return true;
 		if (hostUnits === "no") return false;
 		// Every value the panel displays is a read requirement, so this list must
 		// name each projected unit the row field depends on. Dropping one here
 		// leaves cache rows written before it silently under-reported.
-		return row.routeUsage === undefined || row.dayUsage === undefined || row.routeDayUsage === undefined;
+		if (row.routeUsage === undefined || row.dayUsage === undefined || row.routeDayUsage === undefined) return true;
+		return routeDayCoverageGap(row, today);
 	};
 
 	/** Fill the read slots from the queue. */
@@ -489,8 +848,9 @@ function useUsageRows(sessions, store) {
 
 	react.useEffect(() => {
 		let queued = false;
+		const today = currentDayIndex(hostOffsetMinutes(rows));
 		for (const row of rows) {
-			if (!needsRead(row)) continue;
+			if (!needsRead(row, today)) continue;
 			if (attemptsRef.current.has(row.id)) continue;
 			if (attemptsRef.current.size >= budget) break;
 			attemptsRef.current.set(row.id, "loading");
@@ -503,6 +863,7 @@ function useUsageRows(sessions, store) {
 	let pending = 0;
 	let waiting = 0;
 	let unavailable = 0;
+	const today = currentDayIndex(hostOffsetMinutes(rows));
 	for (const row of rows) {
 		if (row.attempt === "loading") {
 			pending += 1;
@@ -514,7 +875,7 @@ function useUsageRows(sessions, store) {
 			else if (!row.blank) unavailable += 1;
 			continue;
 		}
-		if (needsRead(row) && row.attempt === undefined) waiting += 1;
+		if (needsRead(row, today) && row.attempt === undefined) waiting += 1;
 	}
 
 	const refresh = react.useCallback(() => {

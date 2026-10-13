@@ -33,6 +33,7 @@ const here = dirname(fileURLToPath(import.meta.url))
 const root = join(here, '..')
 const bundlePath = join(root, 'lib', 'client.js')
 const FILTER_KEY = 'dsh-token-usage-panel.filters.v3'
+const THRESHOLD_KEY = 'dsh-token-usage-panel.thresholds.v1'
 const LEGACY_KEYS = ['dsh-token-usage-panel.filters.v1', 'dsh-token-usage-panel.filters.v2']
 const DAY = 86400000
 
@@ -320,6 +321,9 @@ const primitives = new Proxy(primitivesStub, {
 const cssTags = []
 const stored = new Map()
 const downloads = []
+const prompts = []
+/** Next `window.prompt` return; tests assign this before a save. Cancel is `null`. */
+let promptReply = null
 const sandbox = {
   console,
   Blob: class Blob {
@@ -346,6 +350,10 @@ const sandbox = {
       getItem: (key) => (stored.has(key) ? stored.get(key) : null),
       setItem: (key, value) => stored.set(key, String(value)),
       removeItem: (key) => stored.delete(key),
+    },
+    prompt: (message, def) => {
+      prompts.push({ message, def })
+      return promptReply
     },
   },
 }
@@ -420,7 +428,7 @@ check(
 check(css.includes('@container (max-width: 640px)'), 'a second, tighter breakpoint drops the remaining secondary columns')
 check(css.includes('.dshTup_colHideBelow'), 'hidden columns also drop their colgroup track, not just their cells')
 {
-  const bands = ['.dshTup_head', '.dshTup_summary', '.dshTup_routes', '.dshTup_filters', '.dshTup_foot', '.dshTup_kpi']
+  const bands = ['.dshTup_head', '.dshTup_summary', '.dshTup_filters', '.dshTup_foot', '.dshTup_kpi']
   check(
     bands.every((selector) => ruleOf(selector).includes('flex:0 0 auto')),
     'every chrome band is flex:0 0 auto so nothing but the table absorbs the shrink',
@@ -429,6 +437,26 @@ check(css.includes('.dshTup_colHideBelow'), 'hidden columns also drop their colg
 check(css.includes('th{position:sticky'), 'the header row sticks inside the scrollport')
 check(css.includes('--dsw-alias-scrollbar-bg-l2'), 'scrollbars use the theme alias colours')
 check(css.includes('prefers-reduced-motion'), 'transitions and animations honour prefers-reduced-motion')
+check(
+  ruleOf('.dshTup_treeToggleRail').includes('position:absolute') &&
+    ruleOf('.dshTup_treeToggleRail').includes('top:50%') &&
+    ruleOf('.dshTup_treePad').includes('32px +') &&
+    ruleOf('.dshTup_treeToggle').includes('border-radius:999px') &&
+    ruleOf('.dshTup_treeToggle').includes('width:24px'),
+  'tree toggles are a 24px circular hit target outside a shared title rail',
+)
+check(source.includes('dshTup_rowMetaPart') && source.includes('dshTup_rowFamily'), 'session rows split scan metadata and family context into dedicated elements')
+check(source.includes('function efficiencyOf'), 'the bundle derives cache and output composition ratios from the four token buckets')
+check(source.includes('function anomaliesOf'), 'the bundle derives anomaly days from a preceding active-day median')
+check(
+  ruleOf('.dshTup_trendWrap').includes('overscroll-behavior-x:contain') &&
+    ruleOf('.dshTup_heatmapWrap').includes('overscroll-behavior-x:contain'),
+  'chart wrappers only contain horizontal overscroll, so vertical wheel input reaches the page',
+)
+check(
+  ruleOf('.dshTup_heatmap .dshTup_cell').includes('stroke:var(--dsw-alias-border-l2)'),
+  'every calendar cell has a low-contrast grid line in the active theme',
+)
 check(css.split('[data-animate=true]').length - 1 >= 8, 'every motion rule is scoped to the motion-enabled root')
 check(css.includes('@container (max-width: 900px)'), 'narrow panes drop secondary columns instead of scrolling sideways')
 check(
@@ -443,7 +471,7 @@ check(
 check(css.includes('--dsh-tup-stagger') && css.includes('animation-delay:calc('), 'the reveal waves are driven by the shared stagger token')
 check(css.includes('stroke-dasharray:1'), 'the lines are normalised for the draw-on animation')
 check(css.includes('--dsh-tup-row-h:54px') && !css.includes('[data-density'), 'the root carries one row height, with no density variant left')
-check(css.includes('.dshTup_trend') && css.includes('.dshTup_heatmap') && css.includes('.dshTup_donut'), 'the chart styles are declared')
+check(css.includes('.dshTup_trend') && css.includes('.dshTup_heatmap') && css.includes('.dshTup_rank'), 'the chart styles are declared')
 check(css.includes('.dshTup_live') && css.includes('clip-path'), 'the live region is visually hidden, not display:none')
 {
   // Contrast is a computed result, not a configuration, so the emitted colours are
@@ -629,9 +657,17 @@ const seedBlock = (id) => {
  * this array between clicks is exactly what the real service does on archive.
  */
 const archivedIds = []
+const registeredLocales = {}
 const ctx = {
   effect: (fn) => fn(),
-  locale: { register: () => () => undefined, subscribe: () => () => undefined, bind: () => (key) => key },
+  locale: {
+    register: (namespace, dictionaries) => {
+      registeredLocales[namespace] = dictionaries
+      return () => undefined
+    },
+    subscribe: () => () => undefined,
+    bind: () => (key) => key,
+  },
   slots: {
     inject: (key, callback) => {
       callback()
@@ -730,6 +766,22 @@ const titlesIn = () =>
       .map((node) => textOf(node))
       .join(''),
   )
+const idsIn = () => rowsIn().map((row) => row.props['data-row'])
+const treeToggle = (rowId) => {
+  const row = rowsIn().find((node) => node.props['data-row'] === rowId)
+  if (row === undefined) return undefined
+  return collect(
+    row,
+    (node) => node.type === 'button' && typeof node.props.className === 'string' && node.props.className.includes('dshTup_treeToggle'),
+  )[0]
+}
+async function toggleTree(rowId) {
+  const button = treeToggle(rowId)
+  if (button === undefined) return false
+  button.props.onClick({ stopPropagation: () => undefined, preventDefault: () => undefined })
+  await settle()
+  return true
+}
 // The scrollport is the inner element; `.dshTup_tableWrap` is only the shrinkable
 // band around it, so scroll assertions must target the inner one.
 const tableNode = () => collect(tree, (node) => typeof node.props.className === 'string' && node.props.className.includes('dshTup_tableScroll'))[0]
@@ -748,8 +800,10 @@ const trendAria = () =>
 async function pickMenu(prefix, itemLabel) {
   const trigger = menuTrigger(prefix)
   if (trigger === undefined) throw new Error('no menu trigger ' + prefix)
-  trigger.props.onClick()
-  await settle()
+  if (trigger.props['aria-expanded'] !== true) {
+    trigger.props.onClick()
+    await settle()
+  }
   const item = menuItem(itemLabel)
   if (item === undefined) {
     throw new Error(
@@ -758,6 +812,20 @@ async function pickMenu(prefix, itemLabel) {
   }
   item.props.onClick()
   await settle()
+}
+/** Like pickMenu, but returns false when the item is missing so a new check can FAIL instead of throwing. */
+async function tryPickMenu(prefix, itemLabel) {
+  const trigger = menuTrigger(prefix)
+  if (trigger === undefined) return false
+  if (trigger.props['aria-expanded'] !== true) {
+    trigger.props.onClick()
+    await settle()
+  }
+  const item = menuItem(itemLabel)
+  if (item === undefined) return false
+  item.props.onClick()
+  await settle()
+  return true
 }
 async function pickSegment(label) {
   const tab = collect(tree, (node) => node.type === 'button' && node.props.role === 'tab' && textOf(node) === label)[0]
@@ -785,10 +853,10 @@ async function toggle(labelKey) {
   await settle()
 }
 async function reset() {
-  const button = collect(tree, (node) => node.type === 'button' && textOf(node).trim() === 'reset')[0]
-  if (button === undefined) throw new Error('no reset button')
-  button.props.onClick()
-  await settle()
+  const wasOverview = rootNode().props['data-view'] === 'overview'
+  if (wasOverview) await showSessions()
+  await pickMenu('filter.more', 'reset')
+  if (wasOverview) await showOverview()
 }
 async function search(value) {
   collect(tree, (node) => node.type === 'input' && node.props.type === 'search')[0].props.onChange({ target: { value } })
@@ -804,9 +872,11 @@ await settle()
 const overview = text()
 check(rootNode().props['data-view'] === 'overview', 'the panel opens on the overview')
 check(rootNode().props['data-animate'] === 'true', 'the panel enables motion on the root')
-check(overview.includes('kpi.total') && overview.includes('kpi.peak') && overview.includes('kpi.current'), 'the KPI strip renders its labels')
-check(overview.includes('287K'), 'the cumulative KPI reads the filtered total (287K)')
-check(overview.includes('273K'), 'the peak KPI reads the busiest day (273K)')
+check(overview.includes('kpi.total') && overview.includes('kpi.peak') && overview.includes('kpi.current'), 'the KPI strip and calendar note render their labels')
+check(overview.includes('287K'), 'the cumulative KPI reads the lifetime total on range=all (287K)')
+check(overview.includes('273K'), 'the peak reading sits in the calendar note (273K)')
+check(!overview.includes('kpi.compare'), 'range=all does not write a period comparison')
+check(!overview.includes('card.sessionsHint'), 'the overview footer does not count sessions')
 // The longest-chat KPI was removed at the user's request, so the assertion that
 // pinned its duration string is gone with it. The replacement pins the removal:
 // neither the label nor the span formatter may come back into the strip. The
@@ -838,9 +908,10 @@ check(!overview.includes('$') && !overview.includes('cost'), 'no money appears a
     check(heatmaps.length === 1 && heatmaps[0].props.role !== 'img', 'the heatmap does not prune its interactive days as one image')
     check(interactive.length === 0 || interactive.every((cell) => typeof cell.props['aria-label'] === 'string'), 'every selectable day carries a name')
   }
-  const segments = collect(tree, (node) => node.type === 'circle' && typeof node.props.className === 'string' && node.props.className.includes('dshTup_donutSegment'))
-  check(segments.length === 2, 'the donut draws one segment per model (' + segments.length + ')')
-  check(hasClass('dshTup_trendLine') === 2, 'the trend draws one line per model in the window (' + hasClass('dshTup_trendLine') + ')')
+  const segments = collect(tree, (node) => typeof node.props.className === 'string' && node.props.className.includes('dshTup_rankBar'))
+  check(segments.length === 2, 'the model rank draws one bar per model (' + segments.length + ')')
+  check(hasClass('dshTup_trendLine') === 1, 'the trend draws one total line (' + hasClass('dshTup_trendLine') + ')')
+  check(hasClass('dshTup_legendRow') === 0, 'the trend no longer renders a model legend')
   const trend = collect(tree, (node) => node.type === 'svg' && typeof node.props.className === 'string' && node.props.className.includes('dshTup_trend'))[0]
   check(trend !== undefined && trend.props.role === 'img' && typeof trend.props['aria-label'] === 'string', 'the trend is an announced image')
   // The growth animations lean on two structural facts: the heatmap groups its cells
@@ -849,7 +920,7 @@ check(!overview.includes('$') && !overview.includes('cost'), 'no money appears a
   const waveColumns = collect(tree, (node) => node.type === 'g' && typeof node.props.className === 'string' && node.props.className.includes('dshTup_heatCol'))
   check(waveColumns.length === 53, 'the cells are grouped into one animated column per week (' + waveColumns.length + ')')
   check(waveColumns.every((group) => typeof (group.props.style ?? {})['--dsh-tup-i'] === 'number'), 'every wave column carries its stagger index')
-  check(collect(tree, (node) => node.type === 'path' && node.props.pathLength === 1).length === 2, 'every trend line is normalised for the draw-on animation')
+  check(collect(tree, (node) => node.type === 'path' && node.props.pathLength === 1).length === 1, 'the trend line is normalised for the draw-on animation')
 }
 
 console.log('# model drill-down')
@@ -864,7 +935,7 @@ console.log('# model drill-down')
   const chip = collect(tree, (node) => node.type === 'button' && textOf(node).includes('filter.model'))[0]
   chip.props.onClick()
   await settle()
-  check(rowsIn().length === 3, 'clearing the chip restores every session')
+  check(rowsIn().length === 2, 'clearing the chip restores every visible root session')
 }
 
 console.log('# projection read queue')
@@ -906,10 +977,42 @@ console.log('# chart toggles')
     (node) => node.type === 'button' && node.props.role === 'tab' && /^activity\.(day|week|total)$/.test(textOf(node)),
   )
   check(activityTabs.length === 0, 'the activity card offers no aggregation toggle (' + activityTabs.length + ')')
-  await pickSegment('kpi.days{"n":30}')
-  check(String(trendAria()).includes('"days":30'), 'the trend window follows the range toggle (30 days): ' + trendAria())
-  await pickSegment('kpi.days{"n":7}')
+  await pickSegment('range.30d')
+  check(String(trendAria()).includes('"days":30'), 'the trend window follows the header range (30 days): ' + trendAria())
+  await pickSegment('range.7d')
   check(String(trendAria()).includes('"days":7'), 'and back to 7 days: ' + trendAria())
+  await pickSegment('range.all')
+  check(String(trendAria()).includes('"days":4'), 'range=all spans the calendar from first usage to today: ' + trendAria())
+}
+
+console.log('# period compare')
+{
+  const extra = {
+    ...baseProjections,
+    's-1': {
+      ...baseProjections['s-1'],
+      values: {
+        ...baseProjections['s-1'].values,
+        tokenUsageByDay: dayBlock(
+          [
+            { day: TODAY - 10, tokens: tokens(50000, 0, 0, 0) },
+            { day: TODAY - 1, tokens: tokens(100000, 0, 0, 0) },
+            { day: TODAY, tokens: tokens(12000, 3400, 250000, 8000) },
+          ],
+          SPAN_START,
+          SPAN_END,
+        ),
+      },
+    },
+  }
+  listStore.push(snapshotOf(baseById, extra, 'ready'))
+  await settle()
+  await pickSegment('range.7d')
+  check(text().includes('kpi.compare'), 'a 7-day window with a previous period writes a comparison')
+  await pickSegment('range.all')
+  check(!text().includes('kpi.compare'), 'range=all hides the comparison')
+  listStore.push(snapshotOf(baseById, baseProjections, 'ready'))
+  await settle()
 }
 
 console.log('# sessions view')
@@ -917,41 +1020,41 @@ await showSessions()
 check(rootNode().props['data-view'] === 'sessions', 'the view control switches to the table')
 const baseline = text()
 check(baseline.includes('286,700'), 'the headline total sums every session (286,700)')
-check(baseline.includes('282,900'), 'the input figure sums the three prompt-side buckets')
 check(baseline.includes('262,000'), 'the composition legend reports summed cache reads')
-check(titlesIn().join('|') === 'Refactor the sidebar|Long session|Sub task', 'rows render in total-descending order (' + titlesIn().join('|') + ')')
-check(rowsIn().length === 3, 'three session rows render (' + rowsIn().length + ')')
-check(baseline.includes('badge.subagent') && baseline.includes('badge.current'), 'the subagent and current rows are tagged')
-check(baseline.includes('opencode go chat') && baseline.includes('codexpert'), 'the per-model band names the gateways')
-check(baseline.includes('models.title') && baseline.includes('models.total'), 'the per-model band renders its title and total')
+check(hasClass('dshTup_stats') === 0, 'the sessions summary no longer repeats the four buckets as a second row')
+check(titlesIn().join('|') === 'Refactor the sidebar|Long session', 'root rows render in total-descending order (' + titlesIn().join('|') + ')')
+check(rowsIn().length === 2, 'child sessions stay collapsed by default (' + rowsIn().length + ')')
+check(baseline.includes('badge.current') && !idsIn().includes('s-3'), 'the current root is tagged and its child is hidden')
+check(!baseline.includes('models.title'), 'the sessions view leaves the model catalog on the overview')
 check(hasClass('dshTup_costCol') === 0, 'no cost column exists in the table')
 
 console.log('# sorting')
 await clickHeader('col.total')
-check(titlesIn()[0] === 'Sub task', 'clicking the active header flips the direction (lowest first)')
+check(titlesIn()[0] === 'Long session', 'clicking the active header flips the direction (lowest root first)')
 check(ariaSortOf('col.total') === 'ascending', 'the sorted column reports aria-sort (' + String(ariaSortOf('col.total')) + ')')
-await pickMenu('sort', 'title')
-check(titlesIn().join('|') === 'Long session|Refactor the sidebar|Sub task', 'the sort menu orders by title A to Z')
-await clickHeader('col.output')
-check(ariaSortOf('col.output') === 'descending', 'a newly chosen measure column starts descending')
+await pickMenu('filter.more', 'sort.title')
+check(titlesIn().join('|') === 'Long session|Refactor the sidebar', 'the filter menu orders roots by title A to Z')
+await pickMenu('filter.more', 'sort.output')
+check(JSON.parse(stored.get(FILTER_KEY)).sortKey === 'output', 'the filter menu can sort by a hidden measure')
 await reset()
-check(titlesIn().join('|') === 'Refactor the sidebar|Long session|Sub task', 'reset restores the default order')
+check(titlesIn().join('|') === 'Refactor the sidebar|Long session', 'reset restores the default root order')
 
 console.log('# filters')
-await pickSegment('range.today')
-check(rowsIn().length === 2, 'range=today keeps only today sessions (' + rowsIn().length + ')')
+await pickSegment('range.7d')
+check(rowsIn().length === 2, 'range=7d keeps sessions with usage in the window (' + rowsIn().length + ')')
+check(titlesIn().join('|') === 'Refactor the sidebar|Long session', 'the window drops the session with no day buckets')
 await pickSegment('range.all')
-await pickMenu('directory', 'other')
+await pickMenu('filter.more', 'other')
 check(rowsIn().length === 1 && text().includes('13,300'), 'the directory menu narrows to one session')
-check(textOf(menuTrigger('directory')).includes('other'), 'the directory trigger names the active directory')
+check(text().includes('directory') && text().includes('other'), 'the active directory is shown as a chip')
 await reset()
 await search('refactor')
 check(rowsIn().length === 1, 'the search box filters by title')
 await reset()
-await toggle('filter.topLevel')
+await pickMenu('filter.more', 'filter.topLevel')
 check(rowsIn().length === 2, 'top-level-only drops the subagent row (' + rowsIn().length + ')')
 await reset()
-await toggle('filter.used')
+await pickMenu('filter.more', 'filter.used')
 check(rowsIn().length === 2, 'used-only drops the session with no usage data (' + rowsIn().length + ')')
 await reset()
 
@@ -962,7 +1065,11 @@ await reset()
 console.log('# column visibility menu removed')
 check(menuTrigger('columns.title') === undefined, 'no column-visibility trigger is offered')
 check(!text().includes('columns.all'), 'no show-all row is offered')
-check(hasClass('dshTup_share') > 0, 'every column renders unconditionally (share included)')
+check(hasClass('dshTup_share') === 0, 'composition columns stay off until asked')
+await pickMenu('filter.more', 'filter.buckets')
+check(hasClass('dshTup_share') > 0, 'showBuckets reveals the share column')
+await pickMenu('filter.more', 'filter.buckets')
+check(hasClass('dshTup_share') === 0, 'toggling showBuckets hides the share column again')
 check(rootNode().props['data-density'] === undefined && rootNode().props.style['--dsh-tup-row-h'] === '54px', 'the row height is fixed at the comfortable value')
 check(!text().includes('density.'), 'no density control is offered')
 
@@ -977,7 +1084,13 @@ check(rootNode().props['data-view'] === 'overview', 'a corrupt entry falls back 
 check(JSON.parse(stored.get(FILTER_KEY)).range === 'all', 'the defaults are written back over the corrupt entry')
 check(JSON.parse(stored.get(FILTER_KEY)).trendDays === 7, 'an out-of-range trend window falls back to 7')
 await showSessions()
-check(rowsIn().length === 3, 'and the table still lists every session')
+check(rowsIn().length === 2, 'and the table still lists every visible root session')
+stored.set(FILTER_KEY, '{"range":"today","view":"overview"}')
+runtime.restart()
+render()
+await settle()
+check(JSON.parse(stored.get(FILTER_KEY)).range === '7d', 'a stored today range is rewritten to 7d')
+await showSessions()
 await reset()
 
 console.log('# keyboard')
@@ -999,21 +1112,18 @@ console.log('# keyboard')
 console.log('# export')
 {
   clipboards.length = 0
-  await pickMenu('export', 'export.copy')
+  await pickMenu('filter.more', 'export.copy')
   check(clipboards.length === 1, 'the export menu writes the clipboard')
   const lines = clipboards[0].split('\n')
   const header = lines[0].split('\t')
-  check(header.includes('col.session') && header.includes('col.output'), 'the TSV header names the visible columns')
+  check(header.includes('col.session') && header.includes('col.total'), 'the TSV header names the visible columns')
   check(!header.includes('col.cost') && !clipboards[0].includes('$'), 'the export carries no cost column or money')
   check(lines.length === 4, 'the TSV carries a header plus one line per filtered row (' + lines.length + ')')
   check(lines[1].split('\t').includes('273400'), 'numeric cells are exported as raw numbers (273400)')
-  check(text().includes('export.copied'), 'the trigger confirms the copy')
+  check(text().includes('export.copied'), 'the live region confirms the copy')
 }
 {
-  menuTrigger('export').props.onClick()
-  await settle()
-  menuItem('export.download').props.onClick()
-  await settle()
+  await pickMenu('filter.more', 'export.download')
   check(downloads.length === 1 && downloads[0].parts[0].startsWith('\ufeff'), 'the download path builds a BOM-prefixed CSV')
   check(downloads[0].parts[0].includes('Refactor the sidebar'), 'the CSV carries the row titles')
 }
@@ -1034,6 +1144,7 @@ console.log('# pagination bounds the table')
   scroller.props.onScroll({ currentTarget: { scrollTop: 5400, clientHeight: 540 } })
   await settle()
   check(rowsIn().length === 20, 'scrolling the body cannot change the rendered page (' + rowsIn().length + ' rows)')
+  await pickMenu('filter.more', 'filter.buckets')
   check(hasClass('dshTup_hideBelow') > 0, 'responsive columns are marked for the container query')
   check(
     collect(tree, (node) => node.type === 'col' && typeof node.props.className === 'string' && node.props.className.includes('dshTup_colHide')).length > 0,
@@ -1055,15 +1166,12 @@ console.log('# pagination bounds the table')
   const currentById = { ...big.byId, 'm-299': { ...big.byId['m-299'], retainedBy: { mainView: 1 } } }
   listStore.push(snapshotOf(currentById, big.projections, 'ready'))
   await settle()
-  const jump = collect(tree, (node) => node.type === 'button' && textOf(node).trim() === 'jumpToCurrent')[0]
-  check(jump !== undefined, 'the jump-to-current control appears for a row beyond page one')
-  jump.props.onClick()
-  await settle()
+  await pickMenu('filter.more', 'jumpToCurrent')
   check(rowsIn().some((row) => row.props['data-row'] === 'm-299'), 'jumping reaches a current session past the first page')
   check(rowsIn().some((row) => textOf(row).includes('badge.current')), 'the reached row keeps the current tag')
   listStore.push(snapshotOf(baseById, baseProjections, 'ready'))
   await settle()
-  check(rowsIn().length === 3, 'the small fixture comes back without a window')
+  check(rowsIn().length === 2, 'the small fixture comes back without a window')
 }
 
 console.log('# stale cache rows (tokenUsage present, newer units absent)')
@@ -1093,7 +1201,7 @@ console.log('# stale cache rows (tokenUsage present, newer units absent)')
   const filled = collect(tree, (node) => node.type === 'rect' && typeof node.props.fill === 'string' && node.props.fill.startsWith('color-mix(in srgb, var(--dsh-tup-heat)'))
   check(filled.length >= 3, 'and the refreshed rows populate the activity calendar (' + filled.length + ' days)')
   await showSessions()
-  check(rowsIn().length === 3, 'the table still lists every session')
+  check(rowsIn().length === 2, 'the table still lists every visible root session')
 }
 
 console.log('# a Host without the extra units is probed once')
@@ -1165,11 +1273,8 @@ console.log('# skeleton, empty state, and current session')
   await settle()
   await search('nothing-matches-this')
   check(rowsIn().length === 0, 'a filter can hide every row')
-  const jump = collect(tree, (node) => node.type === 'button' && textOf(node).trim() === 'jumpToCurrent')[0]
-  check(jump !== undefined, 'a jump-to-current control is offered')
-  jump.props.onClick()
-  await settle()
-  check(rowsIn().length === 3 && rowsIn().some((row) => textOf(row).includes('badge.current')), 'jumping clears the filters and keeps the current tag')
+  await pickMenu('filter.more', 'jumpToCurrent')
+  check(rowsIn().length === 2 && rowsIn().some((row) => textOf(row).includes('badge.current')), 'jumping clears the filters and keeps the current tag')
 }
 
 console.log('# failed read is contained')
@@ -1179,14 +1284,18 @@ runtime.restart()
 render()
 await settle()
 check(refreshCalls.length === 1, 'a rejected read is attempted once (' + refreshCalls.length + ')')
-check(rowsIn().length === 3, 'the failed row is still listed')
+check(rowsIn().length === 2, 'the failed child stays collapsed under its parent (' + rowsIn().length + ')')
+check(await toggleTree('s-1'), 'the parent of the failed child can expand')
+check(rowsIn().length === 3, 'the failed row is still listed once expanded')
 const retry = collect(tree, (node) => node.type === 'button' && typeof node.props.className === 'string' && node.props.className.includes('dshTup_retry'))[0]
 check(retry !== undefined, 'the failed row offers a retry')
-retry.props.onClick({ stopPropagation: () => undefined })
-await settle()
-check(refreshCalls.length === 2, 'retrying re-enqueues the read (' + refreshCalls.length + ')')
-await settle()
-check(refreshCalls.length === 2, 'a rejected read is not retried on its own')
+if (retry !== undefined) {
+  retry.props.onClick({ stopPropagation: () => undefined })
+  await settle()
+  check(refreshCalls.length === 2, 'retrying re-enqueues the read (' + refreshCalls.length + ')')
+  await settle()
+  check(refreshCalls.length === 2, 'a rejected read is not retried on its own')
+}
 check(text().includes('286,700'), 'the panel still totals the sessions that did resolve')
 
 console.log('# runtime usage audit')
@@ -1210,8 +1319,10 @@ console.log('# runtime usage audit')
   render()
   await settle()
   check(text().includes('audit{'), 'a row whose model sum drifts from its total is reported')
-  const auditNode = collect(tree, (node) => typeof node.props.className === 'string' && node.props.className.includes('dshTup_audit'))[0]
-  check(auditNode !== undefined && String(auditNode.props.title).includes('272,400') && String(auditNode.props.title).includes('273,400'), 'the audit tooltip names the row and both totals (272,400 vs 273,400)')
+  const auditNode = collect(tree, (node) => node.type === 'details' && typeof node.props.className === 'string' && node.props.className.includes('dshTup_audit'))[0]
+  check(auditNode !== undefined && collect(auditNode, (node) => node.type === 'summary').length === 1, 'the audit warning is a native disclosure, reachable by keyboard and touch')
+  const auditText = auditNode === undefined ? '' : textOf(auditNode)
+  check(auditText.includes('272,400') && auditText.includes('273,400'), 'the audit details name the row and both totals (272,400 vs 273,400)')
   // Scope guard: in the honest base fixture the day window sums PAST the session
   // total (387400 > 287400 for s-1) while the routes match exactly — clipping is
   // by design, so the audit must stay silent there.
@@ -1328,8 +1439,20 @@ console.log('# a registry rename reaches the trend legend')
     ),
   )
   await settle()
-  check(text().includes('glow-1'), 'a renamed model reaches the trend legend without a token change')
-  check(text().includes('deepseek-v4.1-flash'), 'the donut keeps its own registry name')
+  await pickSegment('range.7d')
+  const overlay = collect(
+    tree,
+    (node) => node.type === 'rect' && typeof node.props.className === 'string' && node.props.className.includes('dshTup_overlay'),
+  )[0]
+  check(overlay !== undefined, 'the trend overlay is present so a hover can list models')
+  overlay.props.onPointerMove({
+    clientX: 1000,
+    currentTarget: { getBoundingClientRect: () => ({ left: 0, width: 1000 }) },
+  })
+  await settle()
+  check(text().includes('glow-1'), 'a renamed model reaches the 7-day trend tooltip without a token change')
+  await pickSegment('range.all')
+  check(text().includes('deepseek-v4.1-flash'), 'range=all model rank keeps the lifetime registry name')
   listStore.push(snapshotOf(baseById, baseProjections, 'ready'))
   await settle()
   check(!text().includes('glow-1'), 'and the rename leaves with the data')
@@ -1367,7 +1490,7 @@ console.log('# click a day to filter')
   check(chip !== undefined, 'the day chip is a button')
   chip.props.onClick()
   await settle()
-  check(rowsIn().length === 3, 'clearing the day chip restores every session')
+  check(rowsIn().length === 2, 'clearing the day chip restores every visible root session')
 }
 
 console.log('# column widths')
@@ -1412,8 +1535,8 @@ console.log('# header sort buttons leave the tab order')
   const handles = collect(tree, (node) => typeof node.props.className === 'string' && node.props.className.includes('dshTup_resizeHandle'))
   check(handles.every((handle) => handle.props.tabIndex === -1), 'no resize handle is a tab stop (' + handles.length + ')')
   // The sort menu is the keyboard path now, so it must stay reachable.
-  const trigger = menuTrigger('sort.by')
-  check(trigger !== undefined && trigger.props.tabIndex !== -1, 'the sort menu remains the keyboard entry point')
+  const trigger = menuTrigger('filter.more')
+  check(trigger !== undefined && trigger.props.tabIndex !== -1, 'the filter menu remains the keyboard entry point for sorting')
 }
 
 console.log('# per-turn card removal')
@@ -1428,6 +1551,762 @@ console.log('# per-turn card removal')
   check(!/turn\.title(?![\w])/.test(rendered), 'the per-turn card no longer renders')
   const turnSvg = collect(tree, (node) => typeof node.props.className === 'string' && node.props.className.includes('dshTup_turnTrend'))
   check(turnSvg.length === 0, 'no per-turn chart element survives (' + turnSvg.length + ')')
+}
+
+console.log('# model rank expands past the top five')
+{
+  await reset()
+  await showOverview()
+  const many = Array.from({ length: 8 }, (_, index) => ({
+    provider: 'gw' + index,
+    model: 'model-' + index,
+    labels: { providerName: 'gw' + index, modelName: 'model-' + index },
+    tokens: tokens(1000 * (index + 1), 0, 0, 0),
+  }))
+  const wide = {
+    ...baseProjections,
+    's-1': {
+      values: { ...baseProjections['s-1'].values, ...usageOf(36000, 0, 0, 0), tokenUsageByRoute: routeBlock(many) },
+      state: 'ready',
+    },
+  }
+  listStore.push(snapshotOf(baseById, wide))
+  await settle()
+  const modelButtons = () =>
+    collect(tree, (node) => node.type === 'button' && typeof node.props.className === 'string' && node.props.className.includes('dshTup_modelButton'))
+  // 8 routes from s-1 plus claude from s-2: five visible rows and one "other" row.
+  check(modelButtons().length === 6, 'nine models render five rows plus one other row (' + modelButtons().length + ')')
+  const other = modelButtons().find((button) => button.props.className.includes('dshTup_modelOther'))
+  check(other !== undefined && other.props['aria-expanded'] === false, 'the other row is a collapsed disclosure button')
+  if (other !== undefined) {
+    other.props.onClick()
+    await settle()
+  }
+  check(
+    modelButtons().length === 9 && !modelButtons().some((button) => button.props.className.includes('dshTup_modelOther')),
+    'expanding lists every model as its own drill-down button (' + modelButtons().length + ')',
+  )
+  const less = collect(tree, (node) => node.type === 'button' && textOf(node).includes('models.showLess'))[0]
+  check(less !== undefined && less.props['aria-expanded'] === true, 'an expanded list offers a collapse control')
+  if (less !== undefined) {
+    less.props.onClick()
+    await settle()
+  }
+  check(modelButtons().length === 6, 'collapsing restores the top five plus other')
+  listStore.push(snapshotOf(baseById, baseProjections))
+  await settle()
+}
+
+console.log('# empty state offers the way back out')
+{
+  await reset()
+  await showSessions()
+  await search('zz-no-such-session')
+  check(text().includes('emptyFiltered') && !text().includes('emptyAction'), 'a filtered-out table explains the filter instead of offering a new session')
+  const clear = collect(tree, (node) => node.type === 'button' && textOf(node).trim() === 'emptyClear')[0]
+  check(clear !== undefined, 'the filtered empty state offers to clear the filters')
+  if (clear !== undefined) {
+    clear.props.onClick()
+    await settle()
+  }
+  check(rowsIn().length === 2, 'clearing from the empty state restores every visible root session (' + rowsIn().length + ')')
+
+  const oldOnly = {
+    's-2': {
+      values: {
+        ...usageOf(900, 400, 12000, 0),
+        tokenUsageByDay: dayBlock([{ day: TODAY - 40, tokens: tokens(900, 400, 12000, 0) }], (TODAY - 40) * DAY, (TODAY - 40) * DAY + 1000),
+      },
+      state: 'ready',
+    },
+  }
+  listStore.push(snapshotOf({ 's-2': baseById['s-2'] }, oldOnly))
+  await settle()
+  await search('')
+  await pickSegment('range.7d')
+  check(text().includes('emptyRange') && !text().includes('emptyFiltered'), 'a range that holds no usage says so')
+  const all = collect(tree, (node) => node.type === 'button' && textOf(node).trim() === 'emptyAll')[0]
+  check(all !== undefined, 'the range empty state offers the whole history')
+  if (all !== undefined) {
+    all.props.onClick()
+    await settle()
+  }
+  check(rowsIn().length === 1, 'switching to all time brings the old session back (' + rowsIn().length + ')')
+  await pickSegment('range.all')
+  listStore.push(snapshotOf(baseById, baseProjections))
+  await settle()
+}
+
+console.log('# the selected day stays marked on the calendar')
+{
+  await reset()
+  await showOverview()
+  const cells = collect(tree, (node) => node.type === 'rect' && typeof node.props.className === 'string' && node.props.className.includes('dshTup_cell'))
+  check(cells.length > 0 && cells.every((cell) => cell.props.width === 14 && cell.props.height === 14), 'calendar cells are 14px targets')
+  check(!ruleOf('.dshTup_heatmap').includes('max-width'), 'the calendar has no width cap, so it fills the card like the trend')
+  check(!ruleOf('.dshTup_modelList').includes('max-width'), 'the model list has no width cap either')
+  const heatSvg = collect(tree, (node) => node.type === 'svg' && typeof node.props.className === 'string' && node.props.className.includes('dshTup_heatmap'))[0]
+  check(heatSvg !== undefined && heatSvg.props.viewBox.startsWith('0 0 980 '), 'the calendar draws its viewBox at the measured card width (980 before measuring)')
+  check(ruleOf('.dshTup_summary').includes('flex-direction:row'), 'the sessions totals sit beside their composition bar')
+  await showSessions()
+  const sessionCol = collect(tree, (node) => node.type === 'col')[0]
+  check(sessionCol !== undefined && sessionCol.props.style.width === undefined, 'an unresized session column absorbs the spare width')
+  await showOverview()
+  const day = collect(tree, (node) => node.type === 'rect' && node.props.role === 'button')[0]
+  check(day !== undefined, 'the fixture offers a selectable day')
+  const label = day === undefined ? undefined : day.props['aria-label']
+  if (day !== undefined) {
+    day.props.onClick()
+    await settle()
+  }
+  check(rootNode().props['data-view'] === 'sessions', 'picking a day still moves to the sessions view')
+  await showOverview()
+  const marked = collect(tree, (node) => node.type === 'rect' && typeof node.props.className === 'string' && node.props.className.includes('dshTup_cellSelected'))
+  check(marked.length === 1 && marked[0].props['aria-label'] === label, 'exactly the picked day is marked on return (' + marked.length + ')')
+  check(marked[0] !== undefined && marked[0].props['aria-pressed'] === true, 'the picked day announces itself as pressed')
+  const others = collect(tree, (node) => node.type === 'rect' && node.props.role === 'button' && node.props['aria-label'] !== label)
+  check(others.length > 0 && others.every((node) => node.props['aria-pressed'] === false), 'every other selectable day is not pressed')
+  await reset()
+  check(hasClass('dshTup_cellSelected') === 0, 'clearing the day filter clears the mark')
+}
+
+console.log('# the trend reads by keyboard and its tooltip stays inside the card')
+{
+  await reset()
+  await showOverview()
+  await pickSegment('range.7d')
+  const wrap = () =>
+    collect(tree, (node) => node.type === 'div' && typeof node.props.className === 'string' && node.props.className.includes('dshTup_trendWrap'))[0]
+  const tip = () =>
+    collect(tree, (node) => typeof node.props.className === 'string' && node.props.className.includes('dshTup_tooltip') && node.props['data-edge'] !== undefined)[0]
+  const focusable = wrap() !== undefined && wrap().props.tabIndex === 0 && typeof wrap().props.onKeyDown === 'function'
+  check(focusable && wrap().props['aria-label'] === 'trend.keyboard', 'the trend is a named keyboard stop')
+  const press = async (key) => {
+    if (!focusable) return
+    wrap().props.onKeyDown({ key, preventDefault: () => undefined })
+    await settle()
+  }
+  await press('Home')
+  check(tip() !== undefined && tip().props['data-edge'] === 'start', 'the first day anchors its tooltip to the left edge')
+  check(tip() !== undefined && tip().props['aria-live'] === 'polite', 'the tooltip is announced as it moves')
+  await press('End')
+  check(tip() !== undefined && tip().props['data-edge'] === 'end', 'the last day anchors its tooltip to the right edge')
+  await press('ArrowLeft')
+  check(tip() !== undefined, 'arrow keys step through the days')
+  await press('Escape')
+  check(focusable && tip() === undefined, 'Escape dismisses the tooltip')
+  await press('End')
+  if (focusable) {
+    wrap().props.onBlur()
+    await settle()
+  }
+  check(focusable && tip() === undefined, 'leaving the chart dismisses the tooltip')
+  await pickSegment('range.all')
+}
+
+console.log('# one name for the total across both views')
+{
+  const zh = registeredLocales.tokenUsage?.zh ?? {}
+  const en = registeredLocales.tokenUsage?.en ?? {}
+  check(zh['kpi.total'] === 'Token 总量' && zh['card.total'] === 'Token 总量', 'both views call the total by one Chinese name')
+  check(en['kpi.total'] === 'Total tokens' && en['card.total'] === 'Total tokens', 'both views call the total by one English name')
+  check(zh.clean === '筛选后 Token 总量' && en.clean === 'Filtered total tokens', 'the filtered total is named as a narrowing of the same figure')
+  await reset()
+  await showOverview()
+  const hero = collect(tree, (node) => typeof node.props.className === 'string' && node.props.className.includes('dshTup_heroValue'))[0]
+  check(hero !== undefined && String(hero.props.title).includes('286,700'), 'the compact headline exposes the exact figure (286,700)')
+}
+
+console.log('# the stylesheet carries no dead band and no duplicate type step')
+{
+  check(!/\.dshTup_route[A-Za-z]*[{,: ]/.test(css) && !css.includes('.dshTup_routes'), 'no style survives for the removed per-model band')
+  check(!source.includes('function ModelBreakdown'), 'the unrendered per-model band is gone from the bundle')
+  check(!css.includes('--dsh-tup-fs-md'), 'the type scale has no duplicate 13px step')
+  check(css.includes('--dsh-tup-fs-2xs:11px'), 'the smallest text step is 11px')
+  check(!css.includes('.dshTup_card:hover') && !css.includes('.dshTup_chartCard:hover'), 'no hover rule styles a surface that has no border or fill')
+}
+
+console.log('# saved filter views')
+{
+  const VIEW_KEYS = ['name', 'range', 'cwd', 'sortKey', 'sortDesc', 'topLevelOnly', 'usedOnly', 'model', 'day', 'showBuckets', 'columnWidths']
+  const keysOf = (view) => Object.keys(view).sort().join(',')
+  const persistedViews = () => {
+    const raw = stored.get(FILTER_KEY)
+    if (raw === undefined) return []
+    const parsed = JSON.parse(raw)
+    return Array.isArray(parsed.savedViews) ? parsed.savedViews : []
+  }
+  const openFilters = async () => {
+    const trigger = menuTrigger('filter.more')
+    if (trigger === undefined) return
+    if (trigger.props['aria-expanded'] !== true) {
+      trigger.props.onClick()
+      await settle()
+    }
+  }
+  const localeZh = registeredLocales.tokenUsage?.zh ?? {}
+  const localeEn = registeredLocales.tokenUsage?.en ?? {}
+  check(
+    typeof localeZh['views.save'] === 'string' &&
+      typeof localeEn['views.save'] === 'string' &&
+      typeof localeZh['views.delete'] === 'string' &&
+      typeof localeEn['views.delete'] === 'string' &&
+      typeof localeZh['views.heading'] === 'string' &&
+      typeof localeEn['views.heading'] === 'string' &&
+      typeof localeZh['views.savePrompt'] === 'string' &&
+      typeof localeEn['views.savePrompt'] === 'string',
+    'saved-view strings exist in both dictionaries',
+  )
+
+  await reset()
+  await showSessions()
+  await openFilters()
+  check(menuItem('views.save') !== undefined, 'the filter menu offers to save the current filters')
+  check(text().includes('views.heading'), 'the filter menu names the saved-views section')
+
+  await pickMenu('filter.more', 'sort.title')
+  check(titlesIn().join('|') === 'Long session|Refactor the sidebar', 'title sort is in place before saving')
+  prompts.length = 0
+  promptReply = 'By title'
+  check(await tryPickMenu('filter.more', 'views.save'), 'saving the current filters is offered as a menu action')
+  check(prompts.length === 1 && prompts[0].message === 'views.savePrompt', 'saving asks for a name through window.prompt')
+  const saved = persistedViews()
+  check(saved.length === 1 && saved[0].name === 'By title', 'the named view is stored on the filters blob (' + saved.length + ')')
+  check(saved[0] !== undefined && keysOf(saved[0]) === VIEW_KEYS.sort().join(','), 'a saved view stores only the allowed snapshot keys')
+  check(
+    saved[0] !== undefined &&
+      saved[0].range === 'all' &&
+      saved[0].cwd === '' &&
+      saved[0].sortKey === 'title' &&
+      saved[0].sortDesc === false &&
+      saved[0].topLevelOnly === false &&
+      saved[0].usedOnly === false &&
+      saved[0].model === '' &&
+      saved[0].day === null &&
+      typeof saved[0].showBuckets === 'boolean' &&
+      typeof saved[0].columnWidths === 'object' &&
+      saved[0].columnWidths !== null &&
+      !Array.isArray(saved[0].columnWidths),
+    'the snapshot captures range, directory, sort, toggles, model, day, buckets, and widths',
+  )
+  check(saved[0] !== undefined && saved[0].query === undefined && saved[0].view === undefined, 'query and view are not stored on a saved view')
+
+  await reset()
+  check(titlesIn().join('|') === 'Refactor the sidebar|Long session', 'reset restores the default root order')
+  check(persistedViews().length === 1, 'reset keeps the saved-view library')
+  await search('refactor')
+  check(rowsIn().length === 1, 'a live query is in effect before restore')
+  check(await tryPickMenu('filter.more', 'By title'), 'a saved view can be restored from the filter menu')
+  check(collect(tree, (node) => node.type === 'input' && node.props.type === 'search')[0].props.value === 'refactor', 'restoring a view leaves the search query alone')
+  await search('')
+  check(titlesIn().join('|') === 'Long session|Refactor the sidebar', 'restoring reapplies the saved title sort')
+  await openFilters()
+  check(menuItem('By title') !== undefined && textOf(menuItem('By title')).includes('check'), 'the matching saved view is marked selected')
+
+  await search('refactor')
+  check(await tryPickMenu('filter.more', 'views.delete{"name":"By title"}'), 'a saved view can be deleted from the filter menu')
+  check(persistedViews().length === 0, 'deleting removes the view from the filters blob')
+  check(collect(tree, (node) => node.type === 'input' && node.props.type === 'search')[0].props.value === 'refactor', 'deleting a view does not reset the live filters')
+
+  await reset()
+  prompts.length = 0
+  promptReply = ''
+  check(await tryPickMenu('filter.more', 'views.save'), 'save is still offered after the previous view was deleted')
+  check(persistedViews().length === 0, 'an empty name is rejected')
+  promptReply = 'x'.repeat(33)
+  check(await tryPickMenu('filter.more', 'views.save'), 'save is offered for the overlong-name trial')
+  check(persistedViews().length === 0, 'a 33-character name is rejected')
+  promptReply = null
+  check(await tryPickMenu('filter.more', 'views.save'), 'save is offered for the cancel trial')
+  check(persistedViews().length === 0, 'cancelling the name prompt saves nothing')
+  promptReply = '  Trimmed  '
+  check(await tryPickMenu('filter.more', 'views.save'), 'save is offered for the trimmed-name trial')
+  check(persistedViews().length === 1 && persistedViews()[0]?.name === 'Trimmed', 'a name is trimmed and kept at 1-32 characters')
+
+  promptReply = 'Trimmed'
+  await pickMenu('filter.more', 'sort.output')
+  check(await tryPickMenu('filter.more', 'views.save'), 'save is offered when replacing a name')
+  check(persistedViews().length === 1 && persistedViews()[0]?.sortKey === 'output', 'saving the same name replaces the snapshot')
+
+  for (let index = 2; index <= 5; index += 1) {
+    promptReply = 'View ' + index
+    await tryPickMenu('filter.more', 'views.save')
+  }
+  check(persistedViews().length === 5, 'at most five named views are stored (' + persistedViews().length + ')')
+  await openFilters()
+  check(menuItem('views.save') === undefined, 'save is withheld once the library is full')
+
+  stored.set(
+    FILTER_KEY,
+    JSON.stringify({
+      query: 'keep-me',
+      range: 'all',
+      cwd: '',
+      sortKey: 'total',
+      sortDesc: true,
+      topLevelOnly: false,
+      usedOnly: false,
+      model: '',
+      day: null,
+      columnWidths: {},
+      view: 'sessions',
+      trendDays: 7,
+      showBuckets: false,
+      savedViews: [
+        { name: '', range: 'all', cwd: '', sortKey: 'total', sortDesc: true, topLevelOnly: false, usedOnly: false, model: '', day: null, showBuckets: false, columnWidths: {} },
+        { name: 'x'.repeat(33), range: 'all', cwd: '', sortKey: 'total', sortDesc: true, topLevelOnly: false, usedOnly: false, model: '', day: null, showBuckets: false, columnWidths: {} },
+        { name: 'bad-range', range: 'nope', cwd: '', sortKey: 'total', sortDesc: true, topLevelOnly: false, usedOnly: false, model: '', day: null, showBuckets: false, columnWidths: {} },
+        { name: 'missing' },
+        {
+          name: 'extra',
+          range: '7d',
+          cwd: 'C:\\work\\other',
+          sortKey: 'title',
+          sortDesc: false,
+          topLevelOnly: true,
+          usedOnly: true,
+          model: 'opencodegochat/deepseek-v4.1-flash',
+          day: TODAY,
+          showBuckets: true,
+          columnWidths: { total: 180 },
+          query: 'secret',
+          view: 'overview',
+        },
+        { name: 'ok2', range: 'all', cwd: '', sortKey: 'total', sortDesc: true, topLevelOnly: false, usedOnly: false, model: '', day: null, showBuckets: false, columnWidths: {} },
+        { name: 'ok3', range: 'all', cwd: '', sortKey: 'total', sortDesc: true, topLevelOnly: false, usedOnly: false, model: '', day: null, showBuckets: false, columnWidths: {} },
+        { name: 'ok4', range: 'all', cwd: '', sortKey: 'total', sortDesc: true, topLevelOnly: false, usedOnly: false, model: '', day: null, showBuckets: false, columnWidths: {} },
+        { name: 'ok5', range: 'all', cwd: '', sortKey: 'total', sortDesc: true, topLevelOnly: false, usedOnly: false, model: '', day: null, showBuckets: false, columnWidths: {} },
+        { name: 'ok6', range: 'all', cwd: '', sortKey: 'total', sortDesc: true, topLevelOnly: false, usedOnly: false, model: '', day: null, showBuckets: false, columnWidths: {} },
+      ],
+    }),
+  )
+  runtime.restart()
+  render()
+  await settle()
+  await showSessions()
+  const cleaned = persistedViews()
+  check(
+    cleaned.map((view) => view.name).join('|') === 'extra|ok2|ok3|ok4|ok5',
+    'invalid names, shapes, and a sixth view are dropped (' + cleaned.map((view) => view.name).join('|') + ')',
+  )
+  check(cleaned[0] !== undefined && cleaned[0].query === undefined && cleaned[0].view === undefined, 'unknown snapshot fields are stripped on load')
+  check(
+    cleaned[0] !== undefined &&
+      cleaned[0].range === '7d' &&
+      cleaned[0].cwd === 'C:\\work\\other' &&
+      cleaned[0].sortKey === 'title' &&
+      cleaned[0].topLevelOnly === true &&
+      cleaned[0].usedOnly === true &&
+      cleaned[0].model === 'opencodegochat/deepseek-v4.1-flash' &&
+      cleaned[0].day === TODAY &&
+      cleaned[0].showBuckets === true &&
+      cleaned[0].columnWidths.total === 180,
+    'a well-formed view keeps range, directory, sort, toggles, model, day, buckets, and widths',
+  )
+
+  check(collect(tree, (node) => node.type === 'input' && node.props.type === 'search')[0].props.value === 'keep-me', 'reload keeps the live query that is not part of a view')
+  check(await tryPickMenu('filter.more', 'extra'), 'a persisted well-formed view is restorable after reload')
+  check(JSON.parse(stored.get(FILTER_KEY)).range === '7d', 'restoring writes the saved range onto the live filters')
+  check(JSON.parse(stored.get(FILTER_KEY)).view === 'sessions', 'restoring does not steal the current view')
+  check(collect(tree, (node) => node.type === 'input' && node.props.type === 'search')[0].props.value === 'keep-me', 'restoring still leaves the live query alone')
+  check(text().includes('filter.model') && text().includes('filter.day') && text().includes('directory'), 'restoring reapplies model, day, and directory')
+  check(JSON.parse(stored.get(FILTER_KEY)).showBuckets === true, 'restoring reapplies showBuckets')
+  check(JSON.parse(stored.get(FILTER_KEY)).columnWidths.total === 180, 'restoring reapplies column widths')
+
+  await reset()
+}
+
+console.log('# session tree')
+{
+  const localeZh = registeredLocales.tokenUsage?.zh ?? {}
+  const localeEn = registeredLocales.tokenUsage?.en ?? {}
+  check(
+    typeof localeZh['tree.expand'] === 'string' &&
+      typeof localeEn['tree.expand'] === 'string' &&
+      typeof localeZh['tree.collapse'] === 'string' &&
+      typeof localeEn['tree.collapse'] === 'string' &&
+      typeof localeZh['tree.children'] === 'string' &&
+      typeof localeEn['tree.children'] === 'string' &&
+      typeof localeZh['tree.family'] === 'string' &&
+      typeof localeEn['tree.family'] === 'string',
+    'tree strings exist in both dictionaries',
+  )
+  check(css.includes('.dshTup_treeToggle') && css.includes('.dshTup_treePad'), 'the stylesheet styles the tree toggle and indent')
+  check(css.includes('--dsh-tup-row-h:54px'), 'the tree does not change the 54px row height')
+
+  await reset()
+  await showSessions()
+  listStore.push(snapshotOf(baseById, baseProjections, 'ready'))
+  await settle()
+  check(idsIn().join('|') === 's-1|s-2', 'only root sessions are visible while collapsed (' + idsIn().join('|') + ')')
+  check(treeToggle('s-1') !== undefined && treeToggle('s-1').props['aria-expanded'] === false, 'the parent row offers a collapsed disclosure')
+  check(treeToggle('s-2') === undefined, 'a session with no matched children has no disclosure')
+  const parentBefore = rowsIn().find((row) => row.props['data-row'] === 's-1')
+  check(parentBefore !== undefined && textOf(parentBefore).includes('273,400'), 'the parent cell shows its own total')
+  check(parentBefore !== undefined && textOf(parentBefore).includes('tree.family') && textOf(parentBefore).includes('tree.children'), 'the parent also names the family total and child count')
+  check(text().includes('286,700'), 'the summary still sums each session once before expand')
+  check(parentBefore !== undefined && parentBefore.props['aria-level'] === 1, 'root rows announce themselves as level 1')
+
+  opened.length = 0
+  check(await toggleTree('s-1'), 'the parent disclosure expands')
+  check(opened.length === 0, 'expanding does not open the session')
+  check(idsIn().join('|') === 's-1|s-3|s-2', 'the child appears directly under its parent (' + idsIn().join('|') + ')')
+  check(treeToggle('s-1') !== undefined && treeToggle('s-1').props['aria-expanded'] === true, 'an expanded parent reports aria-expanded')
+  const child = rowsIn().find((row) => row.props['data-row'] === 's-3')
+  check(child !== undefined && child.props['aria-level'] === 2, 'the child row announces itself as level 2')
+  check(child !== undefined && textOf(child).includes('badge.subagent'), 'the nested child keeps the subagent badge')
+  check(text().includes('286,700'), 'expanding does not change the summary total')
+  const parentAfter = rowsIn().find((row) => row.props['data-row'] === 's-1')
+  check(parentAfter !== undefined && textOf(parentAfter).includes('273,400'), 'the parent cell still shows its own total after expand')
+
+  parentAfter.props.onClick()
+  check(opened.join(',') === 's-1', 'clicking the parent row still opens it')
+  opened.length = 0
+  child.props.onKeyDown({ key: 'Enter', preventDefault: () => undefined })
+  check(opened.join(',') === 's-3', 'Enter on a child row still opens it')
+
+  await showOverview()
+  await showSessions()
+  check(idsIn().includes('s-3'), 'expand state survives switching to the overview and back')
+  check(await toggleTree('s-1'), 'the parent disclosure collapses again')
+  check(!idsIn().includes('s-3'), 'collapsing hides the child again')
+
+  await pickMenu('filter.more', 'filter.topLevel')
+  check(idsIn().join('|') === 's-1|s-2' && treeToggle('s-1') === undefined, 'top-level-only drops nested children and the disclosure')
+  await reset()
+  await search('Sub task')
+  check(idsIn().join('|') === 's-3' && text().includes('badge.subagent'), 'a matched child whose parent is filtered out becomes a root')
+  await reset()
+
+  clipboards.length = 0
+  await pickMenu('filter.more', 'export.copy')
+  check(clipboards[0] !== undefined && clipboards[0].split('\n').length === 4, 'export still writes every matched session, including collapsed children')
+  check(clipboards[0] !== undefined && clipboards[0].includes('Sub task') && clipboards[0].includes('273400'), 'export keeps own totals, not a doubled family figure')
+
+  const extraById = {
+    ...baseById,
+    's-5': summaryOf('s-5', 'Paid child', { parentId: 's-1' }),
+  }
+  const extraProjections = {
+    ...baseProjections,
+    's-5': { values: usageOf(100, 50, 0, 0), state: 'ready' },
+  }
+  listStore.push(snapshotOf(extraById, extraProjections, 'ready'))
+  await settle()
+  const familyParent = rowsIn().find((row) => row.props['data-row'] === 's-1')
+  check(text().includes('286,850'), 'a billed child is counted once in the summary (286,850)')
+  check(familyParent !== undefined && textOf(familyParent).includes('273,400'), 'the parent cell is still the independent total')
+  check(familyParent !== undefined && textOf(familyParent).includes('273,550'), 'the family total is own plus matched descendants')
+
+  const weirdById = {
+    ...baseById,
+    's-4': summaryOf('s-4', 'Orphan sub', { parentId: 'missing' }),
+    'c-1': summaryOf('c-1', 'Cycle A', { parentId: 'c-2' }),
+    'c-2': summaryOf('c-2', 'Cycle B', { parentId: 'c-1' }),
+    'c-self': summaryOf('c-self', 'Self parent', { parentId: 'c-self' }),
+  }
+  const weirdProjections = {
+    ...baseProjections,
+    's-4': { values: usageOf(10, 5, 0, 0), state: 'ready' },
+    'c-1': { values: usageOf(1, 0, 0, 0), state: 'ready' },
+    'c-2': { values: usageOf(2, 0, 0, 0), state: 'ready' },
+    'c-self': { values: usageOf(3, 0, 0, 0), state: 'ready' },
+  }
+  listStore.push(snapshotOf(weirdById, weirdProjections, 'ready'))
+  await settle()
+  check(idsIn().includes('s-4') && treeToggle('s-4') === undefined, 'an orphan with a missing parent renders as a root')
+  check(idsIn().includes('c-1') && idsIn().includes('c-2'), 'cycle members render as roots instead of looping')
+  check(idsIn().includes('c-self'), 'a self-parent renders as a root')
+  check(text().includes('badge.subagent'), 'orphans keep the subagent badge')
+
+  const pageById = {}
+  const pageProjections = {}
+  pageById['p-0'] = summaryOf('p-0', 'Parent zero', { updatedAt: Date.now() })
+  pageProjections['p-0'] = { values: usageOf(5000, 0, 0, 0), state: 'ready' }
+  for (let index = 0; index < 5; index += 1) {
+    const id = 'p-c-' + index
+    pageById[id] = summaryOf(id, 'Child ' + index, { parentId: 'p-0', updatedAt: Date.now() - 1000 - index })
+    pageProjections[id] = { values: usageOf(10 + index, 0, 0, 0), state: 'ready' }
+  }
+  for (let index = 0; index < 19; index += 1) {
+    const id = 'n-' + index
+    pageById[id] = summaryOf(id, 'Plain ' + index, { updatedAt: Date.now() - 2000 - index })
+    pageProjections[id] = { values: usageOf(100, 0, 0, 0), state: 'ready' }
+  }
+  listStore.push(snapshotOf(pageById, pageProjections, 'ready'))
+  await settle()
+  check(rowsIn().length === 20, 'twenty collapsed roots fill exactly one page (' + rowsIn().length + ')')
+  check(!text().includes('page.status'), 'a single page of roots offers no pager')
+  check(await toggleTree('p-0'), 'expanding a parent on a full page is offered')
+  check(rowsIn().length === 20, 'expanded visible rows are still paged to 20')
+  check(text().includes('page.status'), 'expanding past the page size creates a pager')
+  check(idsIn().includes('p-c-0'), 'the first page keeps the expanded children')
+
+  const jumpById = {
+    ...baseById,
+    's-1': { ...baseById['s-1'], retainedBy: { mainView: 0 } },
+    's-3': { ...baseById['s-3'], retainedBy: { mainView: 1 } },
+  }
+  listStore.push(snapshotOf(jumpById, baseProjections, 'ready'))
+  await settle()
+  await reset()
+  await showSessions()
+  check(!idsIn().includes('s-3'), 'the current child is collapsed before the jump')
+  await pickMenu('filter.more', 'jumpToCurrent')
+  check(idsIn().includes('s-3'), 'jumping expands ancestors so the child is visible')
+  check(rowsIn().some((row) => row.props['data-row'] === 's-3' && textOf(row).includes('badge.current')), 'the reached child keeps the current tag')
+
+  listStore.push(snapshotOf(baseById, baseProjections, 'ready'))
+  await settle()
+  await reset()
+}
+
+console.log('# local token thresholds')
+{
+  const localeZh = registeredLocales.tokenUsage?.zh ?? {}
+  const localeEn = registeredLocales.tokenUsage?.en ?? {}
+  const keys = [
+    'threshold.settings',
+    'threshold.day',
+    'threshold.week',
+    'threshold.session',
+    'threshold.save',
+    'threshold.cancel',
+    'threshold.invalid',
+    'threshold.hint',
+    'threshold.dayOver',
+    'threshold.weekOver',
+    'threshold.sessionOver',
+  ]
+  check(
+    keys.every((key) => typeof localeZh[key] === 'string' && typeof localeEn[key] === 'string'),
+    'threshold strings exist in both dictionaries',
+  )
+  check(
+    keys.every((key) => typeof localeZh[key] === 'string' && typeof localeEn[key] === 'string' && !localeZh[key].includes('$') && !localeEn[key].includes('$')),
+    'threshold copy names tokens, not money',
+  )
+  check(source.includes(THRESHOLD_KEY), 'thresholds persist under their own v1 key, not filters.v3')
+
+  await reset()
+  listStore.push(snapshotOf(baseById, baseProjections, 'ready'))
+  await settle()
+  check(!text().includes('threshold.dayOver'), 'unset thresholds never warn')
+
+  stored.set(THRESHOLD_KEY, '{not-json')
+  runtime.restart()
+  render()
+  await settle()
+  check(!text().includes('threshold.dayOver') && !text().includes('threshold.weekOver'), 'corrupt threshold JSON does not warn')
+
+  stored.set(THRESHOLD_KEY, JSON.stringify({ day: 0, week: -8, session: 1.5, extra: true }))
+  runtime.restart()
+  render()
+  await settle()
+  check(
+    !text().includes('threshold.dayOver') && !text().includes('threshold.weekOver') && !text().includes('threshold.sessionOver'),
+    'zero, negative, and non-integer thresholds are ignored',
+  )
+
+  stored.set(THRESHOLD_KEY, JSON.stringify({ day: 1, week: null, session: null }))
+  runtime.restart()
+  render()
+  await settle()
+  check(text().includes('threshold.dayOver'), 'today usage at or above the day threshold is warned')
+  await search('zz-no-such-session')
+  check(text().includes('threshold.dayOver'), 'threshold warnings ignore the table filters')
+  await search('')
+
+  stored.set(THRESHOLD_KEY, JSON.stringify({ day: null, week: 1, session: null }))
+  runtime.restart()
+  render()
+  await settle()
+  check(text().includes('threshold.weekOver'), 'the trailing 7-day total at or above the week threshold is warned')
+
+  stored.set(THRESHOLD_KEY, JSON.stringify({ day: null, week: null, session: 273400 }))
+  runtime.restart()
+  render()
+  await settle()
+  check(text().includes('threshold.sessionOver'), 'a session at or above the session threshold is warned')
+
+  stored.set(THRESHOLD_KEY, JSON.stringify({ day: null, week: null, session: 273401 }))
+  runtime.restart()
+  render()
+  await settle()
+  check(!text().includes('threshold.sessionOver'), 'a session just under the session threshold is not warned')
+
+  await showSessions()
+  check(await tryPickMenu('filter.more', 'threshold.settings'), 'the filter menu offers threshold settings')
+  const dialog = collect(tree, (node) => node.props.role === 'dialog' && String(node.props['aria-label']).includes('threshold.settings'))[0]
+  check(dialog !== undefined, 'threshold settings open a dialog')
+  const dayInput = collect(tree, (node) => node.type === 'input' && node.props['aria-label'] === 'threshold.day')[0]
+  const weekInput = collect(tree, (node) => node.type === 'input' && node.props['aria-label'] === 'threshold.week')[0]
+  const sessionInput = collect(tree, (node) => node.type === 'input' && node.props['aria-label'] === 'threshold.session')[0]
+  check(dayInput !== undefined && weekInput !== undefined && sessionInput !== undefined, 'the dialog exposes day, week, and session fields')
+  if (dayInput !== undefined) dayInput.props.onChange({ target: { value: '1' } })
+  if (weekInput !== undefined) weekInput.props.onChange({ target: { value: '' } })
+  if (sessionInput !== undefined) sessionInput.props.onChange({ target: { value: '' } })
+  await settle()
+  const save = collect(tree, (node) => node.type === 'button' && textOf(node).trim() === 'threshold.save')[0]
+  check(save !== undefined, 'the dialog offers to save')
+  if (save !== undefined) {
+    save.props.onClick()
+    await settle()
+  }
+  check(JSON.parse(stored.get(THRESHOLD_KEY) ?? '{}').day === 1, 'saving writes a positive day threshold')
+  check(text().includes('threshold.dayOver'), 'saving a crossed threshold shows the warning without a background notification')
+  check(JSON.parse(stored.get(FILTER_KEY)).day === null || JSON.parse(stored.get(FILTER_KEY)).range !== undefined, 'saving thresholds does not replace the filters blob')
+  await pickMenu('filter.more', 'reset')
+  check(JSON.parse(stored.get(THRESHOLD_KEY) ?? '{}').day === 1, 'resetting filters keeps the threshold config')
+
+  if (dayInput === undefined) {
+    await tryPickMenu('filter.more', 'threshold.settings')
+  }
+  const reopen = collect(tree, (node) => node.type === 'input' && node.props['aria-label'] === 'threshold.day')[0]
+  if (reopen === undefined) {
+    await tryPickMenu('filter.more', 'threshold.settings')
+  }
+  const badInput = collect(tree, (node) => node.type === 'input' && node.props['aria-label'] === 'threshold.day')[0]
+  if (badInput !== undefined) {
+    badInput.props.onChange({ target: { value: '-3' } })
+    await settle()
+    const saveAgain = collect(tree, (node) => node.type === 'button' && textOf(node).trim() === 'threshold.save')[0]
+    if (saveAgain !== undefined) {
+      saveAgain.props.onClick()
+      await settle()
+    }
+  }
+  check(text().includes('threshold.invalid') || JSON.parse(stored.get(THRESHOLD_KEY) ?? '{}').day === 1, 'an invalid draft is rejected rather than persisted')
+
+  stored.delete(THRESHOLD_KEY)
+  runtime.restart()
+  render()
+  await settle()
+}
+
+console.log('# 90-day route-by-day coverage')
+{
+  const localeZh = registeredLocales.tokenUsage?.zh ?? {}
+  const localeEn = registeredLocales.tokenUsage?.en ?? {}
+  check(typeof localeZh['range.90d'] === 'string' && typeof localeEn['range.90d'] === 'string', 'the 90-day range is named in both dictionaries')
+  check(typeof localeZh['trend.partial'] === 'string' && typeof localeEn['trend.partial'] === 'string', 'missing per-model coverage has copy in both dictionaries')
+  await reset()
+  await showOverview()
+  const tab90 = collect(tree, (node) => node.type === 'button' && node.props.role === 'tab' && textOf(node) === 'range.90d')[0]
+  check(tab90 !== undefined, 'the header offers a 90-day range')
+  if (tab90 !== undefined) {
+    tab90.props.onClick()
+    await settle()
+  }
+  check(String(trendAria()).includes('"days":90'), 'the 90-day header range draws 90 trend days: ' + trendAria())
+
+  const gapProjections = {
+    ...baseProjections,
+    's-1': {
+      ...baseProjections['s-1'],
+      values: {
+        ...baseProjections['s-1'].values,
+        tokenUsageByDay: dayBlock(
+          [
+            { day: TODAY - 40, tokens: tokens(50, 0, 0, 0) },
+            { day: TODAY, tokens: tokens(12000, 3400, 250000, 8000) },
+          ],
+          SPAN_START,
+          SPAN_END,
+        ),
+        tokenUsageByRouteByDay: routeDayBlock([{ day: TODAY, routes: [{ ...DEEPSEEK, tokens: tokens(12000, 3400, 250000, 8000) }] }]),
+      },
+    },
+  }
+  refreshCalls.length = 0
+  runtime.restart()
+  listStore.push(snapshotOf(baseById, gapProjections, 'ready'))
+  render()
+  await settle()
+  await showOverview()
+  const tab90b = collect(tree, (node) => node.type === 'button' && node.props.role === 'tab' && textOf(node) === 'range.90d')[0]
+  if (tab90b !== undefined) {
+    tab90b.props.onClick()
+    await settle()
+  }
+  check(text().includes('trend.partial'), 'a 90-day window with missing per-model days says so instead of under-counting silently')
+  check(refreshCalls.includes('s-1'), 'a truncated route-by-day row is queued for a projection refresh (' + refreshCalls.join(',') + ')')
+  await pickSegment('range.7d')
+  check(!text().includes('trend.partial'), 'a short window whose per-model days are complete does not claim a gap')
+
+  listStore.push(snapshotOf(baseById, baseProjections, 'ready'))
+  await settle()
+  await reset()
+}
+
+console.log('# analysis exports')
+{
+  const localeZh = registeredLocales.tokenUsage?.zh ?? {}
+  const localeEn = registeredLocales.tokenUsage?.en ?? {}
+  const exportKeys = ['export.days.copy', 'export.days.download', 'export.models.copy', 'export.models.download', 'export.col.date', 'export.col.provider', 'export.col.model', 'col.id']
+  check(
+    exportKeys.every((key) => typeof localeZh[key] === 'string' && typeof localeEn[key] === 'string'),
+    'analysis-export strings exist in both dictionaries',
+  )
+  await reset()
+  await showSessions()
+  listStore.push(snapshotOf(baseById, baseProjections, 'ready'))
+  await settle()
+  if (JSON.parse(stored.get(FILTER_KEY) ?? '{}').showBuckets === true) {
+    await pickMenu('filter.more', 'filter.buckets')
+  }
+
+  clipboards.length = 0
+  await pickMenu('filter.more', 'export.copy')
+  const sessionHeader = clipboards[0] === undefined ? [] : clipboards[0].split('\n')[0].split('\t')
+  check(
+    sessionHeader.includes('col.input') &&
+      sessionHeader.includes('col.cacheRead') &&
+      sessionHeader.includes('col.cacheWrite') &&
+      sessionHeader.includes('col.output') &&
+      sessionHeader.includes('col.total'),
+    'session export always includes the four raw buckets',
+  )
+  check(clipboards[0] !== undefined && clipboards[0].includes('273400') && !clipboards[0].includes('$'), 'session export keeps raw totals and no money')
+
+  clipboards.length = 0
+  check(await tryPickMenu('filter.more', 'export.days.copy'), 'day export is offered')
+  const dayText = clipboards[0] ?? ''
+  const dayHeader = dayText.split('\n')[0] ?? ''
+  check(dayHeader.includes('export.col.date') && dayHeader.includes('col.input') && dayHeader.includes('col.total'), 'day export names the date and the four buckets')
+  check(/\d{4}-\d{2}-\d{2}/.test(dayText), 'day export uses ISO dates')
+  check(dayText.includes('273400') && !dayText.includes('$'), 'day rows carry raw bucket counts and no money')
+
+  await pickSegment('range.7d')
+  clipboards.length = 0
+  await tryPickMenu('filter.more', 'export.days.copy')
+  const dayRows = (clipboards[0] ?? '')
+    .split('\n')
+    .slice(1)
+    .filter((line) => line.trim() !== '')
+  check(dayRows.length <= 7 && dayRows.length > 0, 'a 7-day window exports at most 7 day rows (' + dayRows.length + ')')
+
+  clipboards.length = 0
+  check(await tryPickMenu('filter.more', 'export.models.copy'), 'model export is offered')
+  const modelText = clipboards[0] ?? ''
+  check(modelText.includes('opencodegochat') && modelText.includes('deepseek-v4.1-flash'), 'model export names provider and model ids')
+  check(modelText.includes('12000') && modelText.includes('250000') && !modelText.includes('$'), 'model export carries the four raw buckets')
+
+  downloads.length = 0
+  check(await tryPickMenu('filter.more', 'export.days.download'), 'day CSV download is offered')
+  check(downloads.length === 1 && String(downloads[0].parts[0]).startsWith('\ufeff'), 'day CSV keeps the BOM prefix')
+  downloads.length = 0
+  check(await tryPickMenu('filter.more', 'export.models.download'), 'model CSV download is offered')
+  check(downloads.length === 1 && String(downloads[0].parts[0]).startsWith('\ufeff'), 'model CSV keeps the BOM prefix')
+
+  clipboards.length = 0
+  await search('zz-no-such-session')
+  await pickMenu('filter.more', 'export.copy')
+  await tryPickMenu('filter.more', 'export.days.copy')
+  await tryPickMenu('filter.more', 'export.models.copy')
+  check(clipboards.length === 0, 'an empty filtered set disables every export')
+  await search('')
+  await reset()
 }
 
 console.log('')

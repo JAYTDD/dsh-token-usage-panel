@@ -7,7 +7,7 @@
 #     Registers three usage-derived session projection units:
 #       tokenUsageByRoute        per-model totals (all time)
 #       tokenUsageByDay          per-day totals, last 366 days
-#       tokenUsageByRouteByDay   per-day-per-model detail, last 31 days
+#       tokenUsageByRouteByDay   per-day-per-model detail, last 90 days
 #     They partition the same tokens `dsh-token-meter` already folds into
 #     `tokenUsage`, sharing one event-advance step so the replace-within-a-step
 #     rule and the `llm/retry-started` boundary exist in exactly one place.
@@ -31,9 +31,9 @@
 #
 #   Client (lib/client.js, generated from src/)
 #     Registers one `sidebar.panellist` icon row (the sidebar entry) plus one
-#     keyed `main` panel under the same id, offering an overview view (KPI strip,
-#     activity calendar, daily trend, model donut) and a sessions view (totals,
-#     per-model breakdown, filterable virtualised table).
+#     keyed `main` panel under the same id, offering an overview view (headline
+#     total, activity calendar, daily trend, model rank) and a sessions view
+#     (totals with composition, filterable paginated table).
 #
 # There is NO pricing configuration: money was removed from this plugin. The
 # breakdown is about usage, not billing.

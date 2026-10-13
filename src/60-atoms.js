@@ -48,20 +48,12 @@ function TokenUsageIcon({ size }) {
 	return h(IconDatabaseOutlineRegular, { size });
 }
 
-/** One labelled figure in the summary grid. */
-function Stat({ label, value }) {
-	return h("div", { className: "dshTup_stat" }, [
-		h("dt", { key: "l" }, label),
-		h("dd", { key: "v" }, value),
-	]);
-}
-
 /**
  * Headline totals plus the stacked composition bar over the filtered set.
  * @param props - summed usage, counts, the user-change flag, and translate seat.
  * @returns the summary band.
  */
-function Summary({ totals, filteredTotal, matched, total, grandTotal, filteredOut, animate, t }) {
+function Summary({ totals, filteredTotal, matched, total, grandTotal, filteredOut, showGrand, animate, t }) {
 	const shown = useCountUp(filteredTotal, animate);
 	const parts = SEGMENTS.map((segment) => ({ ...segment, value: totals[segment.key] }));
 	const visible = parts.filter((part) => part.value > 0);
@@ -103,13 +95,7 @@ function Summary({ totals, filteredTotal, matched, total, grandTotal, filteredOu
 				),
 			),
 		]),
-		h("dl", { key: "stats", className: "dshTup_stats" }, [
-			h(Stat, { key: "input", label: t("card.input"), value: formatInt(billedInput(totals)) }),
-			h(Stat, { key: "output", label: t("card.output"), value: formatInt(totals.outputTokens) }),
-			h(Stat, { key: "cacheRead", label: t("segment.cacheRead"), value: formatInt(totals.cacheReadTokens) }),
-			h(Stat, { key: "cacheWrite", label: t("segment.cacheWrite"), value: formatInt(totals.cacheWriteTokens) }),
-		]),
-		filteredOut && grandTotal !== filteredTotal
+		showGrand === true && grandTotal !== filteredTotal
 			? h("div", { key: "grand", className: "dshTup_grand" }, [
 					t("allTime"),
 					h("span", { key: "v", className: "dshTup_grandNum" }, formatInt(grandTotal)),
@@ -118,73 +104,126 @@ function Summary({ totals, filteredTotal, matched, total, grandTotal, filteredOu
 	]);
 }
 
-/**
- * A `Menu` dropdown anchored to an outline button.
- * @param props - trigger presentation, options, current value, and change handler.
- * @returns the anchored dropdown.
- */
-function MenuSelect({ icon, label, value, options, onChange, open, setOpen, triggerText, className, selectedIds }) {
-	// The directory options identify themselves with `id` (the `Menu` items), so
-	// the trigger must accept either key: matching only `value` left the trigger
-	// permanently showing the generic label, i.e. the active directory invisible.
-	const current = options.find((option) => (option.value ?? option.id) === value);
-	return h(Menu, {
-		open,
-		className: cx("dshTup_menu", className),
-		items: options,
-		selectedId: value,
-		selectedIds,
-		onSelect: (next) => {
-			onChange(next);
-			setOpen(false);
+/** One row of filter controls. */
+function FilterRow({ children }) {
+	return h("div", { className: "dshTup_filterRow" }, children);
+}
+
+/** A dismissable chip for one active filter. */
+function FilterChip({ chipKey, label, title, onClear }) {
+	return h(
+		Button,
+		{
+			key: chipKey,
+			variant: "toolbar",
+			size: "sm",
+			icon: h(IconCloseOutlineRegular, { size: 12 }),
+			title,
+			onClick: onClear,
 		},
-		onClose: () => setOpen(false),
-		portal: true,
-		anchor: h(
-			Button,
-			{
-				variant: "outline",
-				className: "dshTup_trigger",
-				icon,
-				"aria-label": label,
-				"aria-haspopup": "menu",
-				"aria-expanded": open,
-				onClick: () => setOpen((previous) => !previous),
-			},
-			[
-				h("span", { key: "l", className: "dshTup_triggerLabel" }, triggerText ?? (current === undefined ? label : current.label)),
-				h(IconChevronDownOutlineRegular, { key: "c", size: 14, className: cx("dshTup_chevron", open && "dshTup_chevronOpen") }),
-			],
-		),
-	});
+		label,
+	);
 }
 
 /**
- * The sort menu: one row per measure, then the direction pair.
- * @param props - current sort, its setter, and the open state.
- * @returns the anchored sort menu.
+ * Directory, sort, export, scoping toggles, saved views, jump, and reset — one
+ * menu so the band can stay a search box plus chips.
  */
-function SortMenu({ filters, setFilters, open, setOpen, t }) {
-	const items = SORT_KEYS.map((key) => ({ id: "key:" + key, label: t("sort." + key) }));
+function FilterMenu({ filters, setFilters, directories, exportProps, onJumpToCurrent, hasCurrent, onOpenThresholds, open, setOpen, t }) {
+	const items = [];
+	const selectedIds = ["sort:" + filters.sortKey, filters.sortDesc ? "dir:desc" : "dir:asc"];
+	if (directories.length > 1) {
+		items.push({ id: "cwd:", label: t("directory.all") });
+		for (const entry of directories) items.push({ id: "cwd:" + entry.path, label: entry.label });
+		items.push({ id: "sep:cwd", type: "separator" });
+		selectedIds.push("cwd:" + filters.cwd);
+	}
+	for (const key of SORT_KEYS) items.push({ id: "sort:" + key, label: t("sort." + key) });
 	items.push({ id: "sep:dir", type: "separator" });
 	items.push({ id: "dir:desc", label: t("sort.desc") });
 	items.push({ id: "dir:asc", label: t("sort.asc") });
-	const direction = filters.sortDesc ? t("direction.desc") : t("direction.asc");
+	items.push({ id: "sep:export", type: "separator" });
+	items.push({ id: "export:copy", label: t("export.copy") });
+	items.push({ id: "export:download", label: t("export.download") });
+	items.push({ id: "export:days:copy", label: t("export.days.copy") });
+	items.push({ id: "export:days:download", label: t("export.days.download") });
+	items.push({ id: "export:models:copy", label: t("export.models.copy") });
+	items.push({ id: "export:models:download", label: t("export.models.download") });
+	items.push({ id: "sep:threshold", type: "separator" });
+	items.push({ id: "threshold:settings", label: t("threshold.settings") });
+	items.push({ id: "sep:scope", type: "separator" });
+	items.push({ id: "toggle:topLevel", label: t("filter.topLevel") });
+	items.push({ id: "toggle:used", label: t("filter.used") });
+	items.push({ id: "toggle:buckets", label: t("filter.buckets") });
+	if (filters.topLevelOnly) selectedIds.push("toggle:topLevel");
+	if (filters.usedOnly) selectedIds.push("toggle:used");
+	if (filters.showBuckets) selectedIds.push("toggle:buckets");
+	const savedViews = Array.isArray(filters.savedViews) ? filters.savedViews : [];
+	const liveSnapshot = viewSnapshotOf(filters);
+	items.push({ id: "sep:views", type: "separator" });
+	items.push({ id: "views:heading", type: "label", text: t("views.heading") });
+	for (let index = 0; index < savedViews.length; index += 1) {
+		const view = savedViews[index];
+		items.push({ id: "view:" + index, label: view.name });
+		items.push({ id: "views.delete:" + index, label: t("views.delete", { name: view.name }) });
+		if (snapshotsEqual(liveSnapshot, viewSnapshotOf(view))) selectedIds.push("view:" + index);
+	}
+	if (savedViews.length < SAVED_VIEW_LIMIT) items.push({ id: "views.save", label: t("views.save") });
+	if (hasCurrent) {
+		items.push({ id: "sep:jump", type: "separator" });
+		items.push({ id: "jump:current", label: t("jumpToCurrent") });
+	}
+	items.push({ id: "sep:reset", type: "separator" });
+	items.push({ id: "reset", label: t("reset") });
+	const menuOpen = open === true;
 	return h(Menu, {
-		open,
+		open: menuOpen,
 		className: "dshTup_menu",
 		items,
-		selectedId: "key:" + filters.sortKey,
-		selectedIds: [filters.sortDesc ? "dir:desc" : "dir:asc"],
+		selectedIds,
 		onSelect: (id) => {
-			if (id.startsWith("key:")) {
-				const key = id.slice(4);
-				// A measure reads best largest-first; a title reads best A to Z.
+			if (id.startsWith("cwd:")) {
+				setFilters((previous) => ({ ...previous, cwd: id.slice(4) }));
+			} else if (id.startsWith("sort:")) {
+				const key = id.slice(5);
 				setFilters((previous) => ({ ...previous, sortKey: key, sortDesc: key !== "title" }));
 			} else if (id === "dir:desc") {
 				setFilters((previous) => ({ ...previous, sortDesc: true }));
 			} else if (id === "dir:asc") {
 				setFilters((previous) => ({ ...previous, sortDesc: false }));
+			} else if (id === "export:copy") {
+				if (exportProps.disabled !== true) exportProps.onCopy();
+			} else if (id === "export:download") {
+				if (exportProps.disabled !== true) exportProps.onDownload();
+			} else if (id === "export:days:copy") {
+				if (exportProps.disabled !== true) exportProps.onCopyDays();
+			} else if (id === "export:days:download") {
+				if (exportProps.disabled !== true) exportProps.onDownloadDays();
+			} else if (id === "export:models:copy") {
+				if (exportProps.disabled !== true) exportProps.onCopyModels();
+			} else if (id === "export:models:download") {
+				if (exportProps.disabled !== true) exportProps.onDownloadModels();
+			} else if (id === "threshold:settings") {
+				if (typeof onOpenThresholds === "function") onOpenThresholds();
+			} else if (id === "toggle:topLevel") {
+				setFilters((previous) => ({ ...previous, topLevelOnly: !previous.topLevelOnly }));
+			} else if (id === "toggle:used") {
+				setFilters((previous) => ({ ...previous, usedOnly: !previous.usedOnly }));
+			} else if (id === "toggle:buckets") {
+				setFilters((previous) => ({ ...previous, showBuckets: !previous.showBuckets }));
+			} else if (id === "views.save") {
+				const typed = typeof window.prompt === "function" ? window.prompt(t("views.savePrompt"), "") : null;
+				setFilters((previous) => addSavedView(previous, typed));
+			} else if (id.startsWith("views.delete:")) {
+				const index = Number(id.slice("views.delete:".length));
+				setFilters((previous) => removeSavedView(previous, index));
+			} else if (id.startsWith("view:")) {
+				const index = Number(id.slice(5));
+				setFilters((previous) => applySavedView(previous, index));
+			} else if (id === "jump:current") {
+				onJumpToCurrent();
+			} else if (id === "reset") {
+				setFilters((previous) => resetFilters(previous));
 			}
 			setOpen(false);
 		},
@@ -195,77 +234,85 @@ function SortMenu({ filters, setFilters, open, setOpen, t }) {
 			{
 				variant: "outline",
 				className: "dshTup_trigger",
-				icon: h(IconFlatListOutlineRegular, { size: 14 }),
-				"aria-label": t("sort.by", { key: t("sort." + filters.sortKey), direction }),
+				icon: h(IconSlidersTwoOutlineRegular, { size: 14 }),
+				"aria-label": t("filter.more"),
 				"aria-haspopup": "menu",
-				"aria-expanded": open,
-				onClick: () => setOpen((previous) => !previous),
+				"aria-expanded": menuOpen,
+				onClick: () => setOpen((previous) => previous !== true),
 			},
 			[
-				h("span", { key: "l", className: "dshTup_triggerLabel" }, t("sort." + filters.sortKey) + " " + (filters.sortDesc ? "↓" : "↑")),
-				h(IconChevronDownOutlineRegular, { key: "c", size: 14, className: cx("dshTup_chevron", open && "dshTup_chevronOpen") }),
+				h("span", { key: "l", className: "dshTup_triggerLabel" }, t("filter.more")),
+				h(IconChevronDownOutlineRegular, { key: "c", size: 14, className: cx("dshTup_chevron", menuOpen && "dshTup_chevronOpen") }),
 			],
 		),
 	});
 }
 
 /**
- * The export menu: copy the current view as TSV, or download it as CSV.
- * @param props - export handlers, the copied flag, and the open state.
- * @returns the anchored export menu.
- */
-function ExportMenu({ onCopy, onDownload, copied, open, setOpen, disabled, t }) {
-	return h(Menu, {
-		open,
-		className: "dshTup_menu",
-		items: [
-			{ id: "copy", label: t("export.copy") },
-			{ id: "download", label: t("export.download") },
-		],
-		onSelect: (id) => {
-			if (id === "copy") onCopy();
-			else onDownload();
-			setOpen(false);
-		},
-		onClose: () => setOpen(false),
-		portal: true,
-		anchor: h(
-			Button,
-			{
-				variant: "outline",
-				className: "dshTup_trigger",
-				icon: h(IconDownloadOutlineRegular, { size: 14 }),
-				disabled,
-				"aria-label": t("export"),
-				"aria-haspopup": "menu",
-				"aria-expanded": open,
-				onClick: () => setOpen((previous) => !previous),
-			},
-			[
-				h("span", { key: "l", className: "dshTup_triggerLabel" }, copied ? t("export.copied") : t("export")),
-				h(IconChevronDownOutlineRegular, { key: "c", size: 14, className: cx("dshTup_chevron", open && "dshTup_chevronOpen") }),
-			],
-		),
-	});
-}
-
-/** One row of filter controls; the band stacks two of them. */
-function FilterRow({ children }) {
-	return h("div", { className: "dshTup_filterRow" }, children);
-}
-
-/**
- * The filter band: identity and ordering on the first row, scoping and
- * presentation on the second.
+ * The filter band: search is always visible; everything else lives in one menu,
+ * with active filters shown as chips.
  * @param props - filters, setters, directories, export handlers, and counts.
  * @returns the filter band.
  */
-function FilterBar({ filters, setFilters, directories, searchRef, exportProps, onJumpToCurrent, hasCurrent, modelLabel, dayOffsetMinutes, t }) {
-	const [openMenu, setOpenMenu] = react.useState(null);
-	const openFor = (id) => ({
-		open: openMenu === id,
-		setOpen: (next) => setOpenMenu(next ? id : null),
-	});
+function FilterBar({ filters, setFilters, directories, searchRef, exportProps, onJumpToCurrent, hasCurrent, onOpenThresholds, modelLabel, dayOffsetMinutes, t }) {
+	const [open, setOpen] = react.useState(false);
+	const chips = [];
+	if (filters.cwd !== "") {
+		const entry = directories.find((item) => item.path === filters.cwd);
+		chips.push(
+			h(FilterChip, {
+				key: "cwd",
+				chipKey: "cwd",
+				label: t("directory") + ": " + (entry === undefined ? (leafName(filters.cwd) ?? filters.cwd) : entry.label),
+				title: t("directory"),
+				onClear: () => setFilters((previous) => ({ ...previous, cwd: "" })),
+			}),
+		);
+	}
+	if (filters.topLevelOnly) {
+		chips.push(
+			h(FilterChip, {
+				key: "topLevel",
+				chipKey: "topLevel",
+				label: t("filter.topLevel"),
+				title: t("filter.topLevel"),
+				onClear: () => setFilters((previous) => ({ ...previous, topLevelOnly: false })),
+			}),
+		);
+	}
+	if (filters.usedOnly) {
+		chips.push(
+			h(FilterChip, {
+				key: "used",
+				chipKey: "used",
+				label: t("filter.used"),
+				title: t("filter.used"),
+				onClear: () => setFilters((previous) => ({ ...previous, usedOnly: false })),
+			}),
+		);
+	}
+	if (filters.model !== "") {
+		chips.push(
+			h(FilterChip, {
+				key: "model",
+				chipKey: "model",
+				label: t("filter.model") + ": " + modelLabel,
+				title: t("models.openSessions"),
+				onClear: () => setFilters((previous) => ({ ...previous, model: "" })),
+			}),
+		);
+	}
+	if (filters.day !== null) {
+		chips.push(
+			h(FilterChip, {
+				key: "day",
+				chipKey: "day",
+				label: t("filter.day") + ": " + formatDayIso(filters.day, dayOffsetMinutes),
+				title: t("filter.clearDay"),
+				onClear: () => setFilters((previous) => ({ ...previous, day: null })),
+			}),
+		);
+	}
 	return h("div", { className: "dshTup_filters" }, [
 		h(FilterRow, { key: "primary" }, [
 			h(Input, {
@@ -279,90 +326,20 @@ function FilterBar({ filters, setFilters, directories, searchRef, exportProps, o
 				"aria-label": t("search"),
 				onChange: (event) => setFilters((previous) => ({ ...previous, query: event.target.value })),
 			}),
-			directories.length > 1
-				? h(MenuSelect, {
-						key: "cwd",
-						icon: h(IconFolderOpenOutlineRegular, { size: 14 }),
-						label: t("directory"),
-						value: filters.cwd,
-						options: [{ id: "", label: t("directory.all") }].concat(
-							directories.map((entry) => ({ id: entry.path, label: entry.label })),
-						),
-						onChange: (next) => setFilters((previous) => ({ ...previous, cwd: next })),
-						...openFor("cwd"),
-					})
-				: null,
-			h(SortMenu, { key: "sort", filters, setFilters, ...openFor("sort"), t }),
-			h(ExportMenu, { key: "export", ...exportProps, ...openFor("export"), t }),
-			filters.model === ""
-				? null
-				: h(
-						Button,
-						{
-							key: "model",
-							variant: "toolbar",
-							size: "sm",
-							icon: h(IconCloseOutlineRegular, { size: 12 }),
-							title: t("models.openSessions"),
-							onClick: () => setFilters((previous) => ({ ...previous, model: "" })),
-						},
-						t("filter.model") + ": " + modelLabel,
-					),
-			filters.day === null
-				? null
-				: h(
-						Button,
-						{
-							key: "day",
-							variant: "toolbar",
-							size: "sm",
-							icon: h(IconCloseOutlineRegular, { size: 12 }),
-							title: t("filter.clearDay"),
-							onClick: () => setFilters((previous) => ({ ...previous, day: null })),
-						},
-						t("filter.day") + ": " + formatDayIso(filters.day, dayOffsetMinutes),
-					),
-			h("span", { key: "spacer", className: "dshTup_filterSpacer" }),
-			h(
-				Button,
-				{
-					key: "reset",
-					variant: "ghost",
-					icon: h(IconSlidersTwoOutlineRegular, { size: 14 }),
-					disabled: !isFiltered(filters),
-					onClick: () => setFilters((previous) => resetFilters(previous)),
-				},
-				t("reset"),
-			),
-		]),
-		h(FilterRow, { key: "secondary" }, [
-			h(SegmentedControl, {
-				key: "range",
-				id: "dsh-tup-range",
-				label: t("range"),
-				value: filters.range,
-				options: RANGES.map((value) => ({ value, label: t("range." + value) })),
-				onChange: (next) => setFilters((previous) => ({ ...previous, range: next })),
+			h(FilterMenu, {
+				key: "more",
+				filters,
+				setFilters,
+				directories,
+				exportProps,
+				onJumpToCurrent,
+				hasCurrent,
+				onOpenThresholds,
+				open,
+				setOpen,
+				t,
 			}),
-			h(Checkbox, {
-				key: "topLevel",
-				checked: filters.topLevelOnly,
-				label: t("filter.topLevel"),
-				onChange: (next) => setFilters((previous) => ({ ...previous, topLevelOnly: next })),
-			}),
-			h(Checkbox, {
-				key: "used",
-				checked: filters.usedOnly,
-				label: t("filter.used"),
-				onChange: (next) => setFilters((previous) => ({ ...previous, usedOnly: next })),
-			}),
-			hasCurrent
-				? h(
-						Button,
-						{ key: "current", variant: "ghost", size: "sm", onClick: onJumpToCurrent },
-						t("jumpToCurrent"),
-					)
-				: null,
+			...chips,
 		]),
 	]);
 }
@@ -412,7 +389,7 @@ function HeaderCell({ column, filters, onSort, onResize, t }) {
 							type: "button",
 							className: "dshTup_thBtn",
 							// Not a tab stop: the panel's keyboard path to sorting is the
-							// filter bar's SortMenu, which also carries the direction pair.
+							// filter menu, which also carries the direction pair.
 							// Seven header stops to cross before reaching the table is a
 							// keyboard tax for a control that duplicates it.
 							tabIndex: -1,
@@ -449,104 +426,4 @@ function HeaderCell({ column, filters, onSort, onResize, t }) {
 	);
 }
 
-/**
- * The per-model breakdown for the filtered sessions.
- *
- * It sits outside the table because it answers a different question: the table is
- * per session, this is per model over the same filtered set. Each row reads
- * `gateway · model`, both names resolved by the Host from the LLM registry — the
- * browser never re-derives either — and clicking a row narrows the sessions to
- * that model, which is the whole point of seeing the split.
- *
- * Two readings of the same data. Flat, one chip per route, which is what the
- * numbers are keyed on. Or grouped by gateway, which is what a reader wants once
- * several gateways serve overlapping model names: the group header answers "who
- * is spending", the chips inside it answer "on what". Grouping is a view over the
- * same routes, never a re-aggregation — the fold invariants are about the
- * projections, not about this list.
- *
- * @param props - the merged breakdown, a select handler, and the translate seat.
- * @returns the band, or null when no row carries model data.
- */
-function ModelBreakdown({ breakdown, onSelect, t }) {
-	// The hook is called before the early return so the unit count never depends
-	// on whether the breakdown has data yet.
-	const [grouping, setGrouping] = react.useState("provider");
-	if (breakdown === undefined) return null;
-	const total = totalOfRoutes(breakdown.routes);
-	const shareOf = (value) => formatShare(total > 0 ? value / total : 0);
-	const chip = (route) => {
-		const tokens = totalOf(route.tokens);
-		return h(
-			"li",
-			{ key: routeIdOf(route), className: "dshTup_routeItem" },
-			h(
-				"button",
-				{
-					type: "button",
-					className: "dshTup_routeButton",
-					title: t("models.openSessions"),
-					onClick: () => onSelect(routeIdOf(route)),
-				},
-				[
-					h("span", { key: "dot", className: "dshTup_dot", style: { background: routeColor(routeIdOf(route)) } }),
-					h("span", { key: "v", className: "dshTup_providerTag" }, route.providerName),
-					h("span", { key: "m", className: "dshTup_routeModel" }, route.modelName),
-					h("span", { key: "n", className: "dshTup_routeTokens" }, formatCompact(tokens)),
-					h("span", { key: "p", className: "dshTup_routeShare" }, shareOf(tokens)),
-				],
-			),
-		);
-	};
-	const groups = [];
-	if (grouping === "provider") {
-		const byProvider = new Map();
-		for (const route of breakdown.routes) {
-			let group = byProvider.get(route.provider);
-			if (group === undefined) {
-				group = { provider: route.provider, providerName: route.providerName, value: 0, routes: [] };
-				byProvider.set(route.provider, group);
-			}
-			group.value += totalOf(route.tokens);
-			group.routes.push(route);
-		}
-		groups.push(...byProvider.values());
-		// The routes arrive sorted by size, so each group's members already are;
-		// only the groups themselves need ordering.
-		groups.sort((left, right) => right.value - left.value || left.provider.localeCompare(right.provider));
-	}
-	return h("section", { className: "dshTup_routes" }, [
-		h("div", { key: "head", className: "dshTup_routeHead" }, [
-			h("span", { key: "l", className: "dshTup_sumLabel" }, t("models.title")),
-			h(SegmentedControl, {
-				key: "grouping",
-				id: "dsh-tup-model-grouping",
-				label: t("models.group"),
-				value: grouping,
-				options: [
-					{ value: "provider", label: t("models.group.provider") },
-					{ value: "model", label: t("models.group.model") },
-				],
-				onChange: setGrouping,
-			}),
-			h("span", { key: "c", className: "dshTup_routeMoney" }, t("models.total") + " " + formatInt(total) + " " + t("unit.tokens")),
-		]),
-		grouping === "model"
-			? h("ul", { key: "list", className: "dshTup_routeList" }, breakdown.routes.map(chip))
-			: h(
-					"ul",
-					{ key: "groups", className: "dshTup_routeGroups" },
-					groups.map((group) =>
-						h("li", { key: group.provider, className: "dshTup_routeGroup" }, [
-							h("div", { key: "h", className: "dshTup_routeGroupHead" }, [
-								h("span", { key: "n", className: "dshTup_routeGroupName" }, group.providerName),
-								h("span", { key: "t", className: "dshTup_routeTokens" }, formatCompact(group.value)),
-								h("span", { key: "p", className: "dshTup_routeShare" }, shareOf(group.value)),
-							]),
-							h("ul", { key: "m", className: "dshTup_routeList" }, group.routes.map(chip)),
-						]),
-					),
-				),
-	]);
-}
 //#endregion

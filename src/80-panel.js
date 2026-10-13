@@ -1,10 +1,10 @@
 /**
  * The usage panel: two views over one filter set.
  *
- *   `overview`  the KPI strip, the activity calendar, the daily trend, and the
- *               model donut — a document-flow scroll, because charts stack.
- *   `sessions`  the headline totals, the per-model breakdown, and the table, which
- *               keeps the fixed-chrome-plus-one-scroller model described below.
+ *   `overview`  the KPI strip, a compact year calendar, the daily trend, and the
+ *               model rank — a document-flow scroll, because charts stack.
+ *   `sessions`  the headline totals and the table. The header range is the usage
+ *               window shared with the overview.
  *
  * Two rules keep it smooth while a session streams:
  *
@@ -35,6 +35,44 @@ function TokenUsagePanel(props) {
 	const [focusId, setFocusId] = react.useState(undefined);
 	const [windowInfo, setWindowInfo] = react.useState(null);
 	const [page, setPage] = react.useState(1);
+	const [modelsExpanded, setModelsExpanded] = react.useState(false);
+	/** Which parent sessions currently show their matched children. Not persisted. */
+	const [expandedIds, setExpandedIds] = react.useState(() => new Set());
+	const [thresholds, setThresholds] = react.useState(loadThresholds);
+	const [thresholdOpen, setThresholdOpen] = react.useState(false);
+	const [thresholdDraft, setThresholdDraft] = react.useState(() => draftOfThresholds(loadThresholds()));
+	const toggleExpand = react.useCallback((id) => {
+		setExpandedIds((previous) => {
+			const next = new Set(previous);
+			if (next.has(id)) next.delete(id);
+			else next.add(id);
+			return next;
+		});
+	}, []);
+	/**
+	 * The calendar's measured card width. Hooks stay here, unconditionally, because
+	 * the overview's charts mount and unmount with the view; a hook inside a child
+	 * would shift every later slot in the self-check's hook runtime.
+	 */
+	const [heatWidth, setHeatWidth] = react.useState(0);
+	const heatObserver = react.useRef(null);
+	const measureHeat = react.useCallback((node) => {
+		if (heatObserver.current !== null) {
+			heatObserver.current();
+			heatObserver.current = null;
+		}
+		if (node === null || node === undefined || typeof node.clientWidth !== "number") return;
+		const measure = () => {
+			const next = Math.max(HEATMAP_FLOOR, Math.round(node.clientWidth));
+			setHeatWidth((previous) => (previous === next ? previous : next));
+		};
+		measure();
+		if (typeof ResizeObserver === "function") {
+			const observer = new ResizeObserver(measure);
+			observer.observe(node);
+			heatObserver.current = () => observer.disconnect();
+		}
+	}, []);
 	/**
 	 * The text of the panel's single live region.
 	 *
@@ -63,6 +101,10 @@ function TokenUsagePanel(props) {
 	react.useEffect(() => {
 		saveFilters(filters);
 	}, [filters]);
+
+	react.useEffect(() => {
+		saveThresholds(thresholds);
+	}, [thresholds]);
 
 	react.useEffect(
 		() => () => {
@@ -100,32 +142,47 @@ function TokenUsagePanel(props) {
 	// The input updates urgently; the table catches up. A large re-sort must never
 	// make typing lose keystrokes.
 	const deferredQuery = react.useDeferredValue(filters.query);
+	const offsetMinutes = react.useMemo(() => hostOffsetMinutes(rows), [rows]);
+	const today = currentDayIndex(offsetMinutes);
+	const usageWindow = react.useMemo(() => usageWindowOf(filters.range, today), [filters.range, today]);
+	const tableWindow = react.useMemo(
+		() => (filters.day !== null ? { fromDay: filters.day, toDay: filters.day } : usageWindow),
+		[filters.day, usageWindow],
+	);
 	const filtered = react.useMemo(
-		() => selectRows(rows, deferredQuery === filters.query ? filters : { ...filters, query: deferredQuery }, Date.now()),
-		[rows, filters, deferredQuery],
+		() => selectRows(rows, deferredQuery === filters.query ? filters : { ...filters, query: deferredQuery }, today),
+		[rows, filters, deferredQuery, today],
 	);
 	/**
-	 * The rows the overview's calendars, KPIs, and trend are built from.
+	 * The rows the overview's calendars are built from.
 	 *
-	 * Identical to `filtered` except that the `day` filter is ignored. That filter
-	 * is set by clicking a cell *of the very calendar it feeds*, so honouring it
-	 * here would collapse the year grid to the single day just clicked — the chart
-	 * answering its own question with its own answer. Every other filter still
-	 * applies, so the overview keeps describing the current selection as a whole.
+	 * Range and the day chip are ignored: the year grid is always a year, and the
+	 * day chip is set by clicking a cell of that grid, so honouring it here would
+	 * collapse the chart to the day just clicked. Query, directory, model, and the
+	 * two scoping toggles still apply.
 	 */
-	const calendarRows = react.useMemo(
-		() => (filters.day === null ? filtered : selectRows(rows, { ...filters, day: null }, Date.now())),
-		[rows, filters, filtered],
+	const heatRows = react.useMemo(
+		() => selectRows(rows, { ...filters, query: deferredQuery, range: "all", day: null }, today),
+		[rows, filters, deferredQuery, today],
 	);
-	const pageCount = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
+	const nested = react.useMemo(() => nestRows(filtered), [filtered]);
+	const visible = react.useMemo(() => {
+		const from = tableWindow === null ? undefined : tableWindow.fromDay;
+		const to = tableWindow === null ? undefined : tableWindow.toDay;
+		const usageOfRow = (row) => (from === undefined ? row.usage : usageInWindow(row, from, to));
+		return flattenTree(nested.roots, nested.childrenOf, expandedIds).map((node) => {
+			if (node.childCount === 0) return node;
+			const family = familyUsageOf(node.row, nested.childrenOf, usageOfRow);
+			return { ...node, familyTotal: family === undefined ? undefined : totalOf(family) };
+		});
+	}, [nested, expandedIds, tableWindow]);
+	const pageCount = Math.max(1, Math.ceil(visible.length / PAGE_SIZE));
 	const currentPage = Math.min(page, pageCount);
-	// One page of rows, always. The previous form handed the WHOLE filtered list to the
-	// table whenever there was more than one page, so the pager moved its label but
-	// never the rows. Slicing unconditionally is also right for a single page, whose
-	// length is at most PAGE_SIZE.
+	// One page of *visible* rows, after expand/collapse. Collapsed children do not
+	// occupy a slot; expanding a parent can create a second page.
 	const paged = react.useMemo(
-		() => filtered.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE),
-		[filtered, currentPage],
+		() => visible.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE),
+		[visible, currentPage],
 	);
 	react.useEffect(() => {
 		if (page > pageCount) setPage(pageCount);
@@ -143,8 +200,11 @@ function TokenUsagePanel(props) {
 		return [...seen.values()].sort((left, right) => left.label.localeCompare(right.label));
 	}, [rows]);
 
-	/** Summed usage over the filtered set; rows without data contribute nothing. */
-	const totals = react.useMemo(() => sumUsages(filtered.map((row) => row.usage ?? ZERO_USAGE)), [filtered]);
+	/** Summed usage over the filtered set, in the same window the table shows. */
+	const totals = react.useMemo(
+		() => sumUsageInWindow(filtered, tableWindow === null ? undefined : tableWindow.fromDay, tableWindow === null ? undefined : tableWindow.toDay),
+		[filtered, tableWindow],
+	);
 	const filteredTotal = totalOf(totals);
 	const grandTotal = react.useMemo(() => totalOf(sumUsages(rows.map((row) => row.usage ?? ZERO_USAGE))), [rows]);
 	/**
@@ -154,7 +214,11 @@ function TokenUsagePanel(props) {
 	 */
 	const audit = react.useMemo(() => auditUsageConsistency(rows), [rows]);
 	const columns = react.useMemo(() => orderedColumns(filters), [filters]);
-	const breakdown = react.useMemo(() => aggregateRoutes(filtered), [filtered]);
+	const breakdown = react.useMemo(() => {
+		const source = filters.view === "overview" ? heatRows : filtered;
+		const window = filters.view === "overview" ? usageWindow : tableWindow;
+		return aggregateRoutesInWindow(source, window === null ? undefined : window.fromDay, window === null ? undefined : window.toDay);
+	}, [filters.view, heatRows, filtered, usageWindow, tableWindow]);
 	const rowHeight = ROW_HEIGHT;
 	// The session shown in the workspace's centre column: the table marks its row
 	// and the filter bar offers to jump back to it. Compare `retainedMainView` as a
@@ -168,60 +232,91 @@ function TokenUsagePanel(props) {
 		filters.usedOnly ||
 		filters.model !== "" ||
 		filters.day !== null;
+	/** Why an empty table is empty: a narrowing filter, the header range, or no data at all. */
+	const narrowed =
+		filters.topLevelOnly ||
+		filters.cwd !== "" ||
+		filters.query.trim() !== "" ||
+		filters.usedOnly ||
+		filters.model !== "" ||
+		filters.day !== null;
+	const emptyKind = narrowed ? "filtered" : filters.range !== "all" ? "range" : "none";
 
 	//#region overview data (only while the overview is on screen)
 	const isOverview = filters.view === "overview";
-	const calendar = react.useMemo(() => (isOverview ? aggregateDays(calendarRows) : null), [isOverview, calendarRows]);
-	const routeCalendar = react.useMemo(() => (isOverview ? aggregateRouteDays(calendarRows) : null), [isOverview, calendarRows]);
+	const calendar = react.useMemo(() => (isOverview ? aggregateDays(heatRows) : null), [isOverview, heatRows]);
+	const routeCalendar = react.useMemo(() => (isOverview ? aggregateRouteDays(heatRows) : null), [isOverview, heatRows]);
 	/**
 	 * The Host offset that labels the day chip.
 	 *
-	 * The calendar (and its offset) only exists while the overview is mounted,
-	 * but the chip lives in the sessions view — the view a calendar click
-	 * switches to. Recovering the offset from the rows is what keeps the chip in
-	 * the Host's frame; rendering it with 0 would label the selected day one day
-	 * early for a Host west of UTC (a same-timezone machine cancels this error,
-	 * which is why the regression must use a whole-day offset).
+	 * The calendar is not mounted on the sessions view — the view a calendar
+	 * click switches to — so the chip recovers the offset from the row that
+	 * owns the selected day. Rendering it with 0 would label the day one day
+	 * early for a Host west of UTC.
 	 */
 	const dayFilterOffset = react.useMemo(() => {
-		if (filters.day === null) return 0;
-		let fallback = 0;
-		let found = false;
+		if (filters.day === null) return offsetMinutes;
+		let fallback = offsetMinutes;
 		for (const row of rows) {
 			const value = row.dayUsage;
 			if (value === undefined) continue;
-			if (!found) {
-				fallback = value.offsetMinutes ?? 0;
-				found = true;
-			}
 			if (value.days.some((entry) => entry.day === filters.day)) return value.offsetMinutes ?? 0;
 		}
 		return fallback;
-	}, [rows, filters.day]);
-	const offsetMinutes = calendar === null ? dayFilterOffset : calendar.offsetMinutes;
-	const today = currentDayIndex(offsetMinutes);
+	}, [rows, filters.day, offsetMinutes]);
 	const streak = react.useMemo(() => (calendar === null ? { longest: 0, current: 0 } : streaksOf(calendar.byDay, today)), [calendar, today]);
 	const peak = react.useMemo(() => (calendar === null ? 0 : peakOf(calendar.byDay)), [calendar]);
-	const trendDays = react.useMemo(() => (isOverview ? rangeDays(today, filters.trendDays) : []), [isOverview, today, filters.trendDays]);
-	const trend = react.useMemo(
-		() => (routeCalendar === null ? { series: [] } : trendSeries(routeCalendar.byDay, trendDays, t)),
-		[routeCalendar, trendDays, t],
+	const anomalies = react.useMemo(() => (calendar === null ? new Map() : anomaliesOf(calendar.byDay)), [calendar]);
+	const trendDays = react.useMemo(
+		() => (isOverview && calendar !== null ? trendDaysOf(filters.range, today, calendar.byDay) : []),
+		[isOverview, calendar, filters.range, today],
+	);
+	const trendValues = react.useMemo(
+		() => (calendar === null ? new Map() : totalsByDay(calendar.byDay, trendDays)),
+		[calendar, trendDays],
+	);
+	const trendHover = react.useMemo(
+		() =>
+			routeCalendar === null || usageWindow === null ? undefined : trendDetails(routeCalendar.byDay, trendDays),
+		[routeCalendar, usageWindow, trendDays],
 	);
 	// Zero-token days exist in the state (a zero sample is recorded, not dropped)
 	// but must not count as "there is calendar data": the grid would render empty
 	// while claiming a year of data.
 	const hasCalendar = calendar !== null && [...calendar.byDay.values()].some((tokens) => totalOf(tokens) > 0);
 	/**
-	 * The overview KPI total. It ignores the day filter exactly like the calendar
-	 * and the trend do — the day filter is set by clicking a cell *of* the
-	 * calendar and belongs to the table, so an overview showing one day's total
-	 * beside a year of chart would contradict itself. Every other filter still
-	 * applies (the rows come from `calendarRows`).
+	 * The overview KPI total. Windowed over `heatRows`, so it ignores the day
+	 * chip (that filter belongs to the table) and follows the header range.
 	 */
 	const overviewTotal = react.useMemo(
-		() => (filters.day === null ? filteredTotal : totalOf(sumUsages(calendarRows.map((row) => row.usage ?? ZERO_USAGE)))),
-		[filters.day, filteredTotal, calendarRows],
+		() => totalOf(sumUsageInWindow(heatRows, usageWindow === null ? undefined : usageWindow.fromDay, usageWindow === null ? undefined : usageWindow.toDay)),
+		[heatRows, usageWindow],
 	);
+	const compareLabel = react.useMemo(() => {
+		if (!isOverview || calendar === null || usageWindow === null) return null;
+		const previous = previousUsageWindow(usageWindow);
+		if (previous === null) return null;
+		const currentTotal = sumDaysBetween(calendar.byDay, usageWindow.fromDay, usageWindow.toDay);
+		const previousTotal = sumDaysBetween(calendar.byDay, previous.fromDay, previous.toDay);
+		if (previousTotal <= 0) return null;
+		const change = Math.round(((currentTotal - previousTotal) / previousTotal) * 100);
+		const delta = change > 0 ? "+" + change + "%" : change + "%";
+		return t("kpi.compare", { n: usageWindow.toDay - usageWindow.fromDay + 1, delta });
+	}, [isOverview, calendar, usageWindow, t]);
+	const heatNote =
+		calendar === null
+			? ""
+			: t("kpi.peak") +
+				" " +
+				formatCompact(peak) +
+				" · " +
+				t("kpi.current") +
+				" " +
+				t("kpi.days", { n: streak.current }) +
+				" · " +
+				t("kpi.longestRun") +
+				" " +
+				t("kpi.days", { n: streak.longest });
 	/**
 	 * The label of the active model filter. Resolved from the breakdown rather than
 	 * echoed as the raw `provider/model` route, so the chip reads like the legend
@@ -278,14 +373,28 @@ function TokenUsagePanel(props) {
 	 */
 	react.useEffect(() => {
 		if (focusId === undefined) return;
-		const index = filtered.findIndex((row) => row.id === focusId);
+		if (!nested.present.has(focusId)) {
+			onFocusHandled();
+			return;
+		}
+		const ancestors = ancestorIds(focusId, nested.parentOf, nested.present);
+		const needsExpand = ancestors.some((id) => !expandedIds.has(id));
+		if (needsExpand) {
+			setExpandedIds((previous) => {
+				const next = new Set(previous);
+				for (const id of ancestors) next.add(id);
+				return next;
+			});
+			return;
+		}
+		const index = visible.findIndex((node) => node.row.id === focusId);
 		if (index < 0) {
 			onFocusHandled();
 			return;
 		}
 		const target = Math.floor(index / PAGE_SIZE) + 1;
 		setPage((previous) => (previous === target ? previous : target));
-	}, [focusId, filtered, onFocusHandled]);
+	}, [focusId, nested, visible, expandedIds, onFocusHandled]);
 
 	/** Narrow to one model's sessions — the payoff of seeing the split. */
 	const onSelectModel = react.useCallback(
@@ -294,6 +403,18 @@ function TokenUsagePanel(props) {
 		},
 		[updateFilters],
 	);
+	const toggleModels = react.useCallback(() => setModelsExpanded((value) => !value), []);
+	const openThresholdEditor = react.useCallback(() => {
+		setThresholdDraft(draftOfThresholds(thresholds));
+		setThresholdOpen(true);
+	}, [thresholds]);
+	const closeThresholdEditor = react.useCallback(() => setThresholdOpen(false), []);
+	const applyThresholdDraft = react.useCallback(() => {
+		const next = thresholdsFromDraft(thresholdDraft);
+		if (next === undefined) return;
+		setThresholds(next);
+		setThresholdOpen(false);
+	}, [thresholdDraft]);
 
 	/**
 	 * One drag, tracked across the three pointer phases.
@@ -335,27 +456,20 @@ function TokenUsagePanel(props) {
 		[updateFilters],
 	);
 
-	const exportLines = react.useMemo(() => {
-		const exportColumns = columns.filter((column) => column.key !== "share");
-		const lines = [exportColumns.map((column) => t(column.labelKey))];
-		for (const row of filtered) {
-			const display = displayOf(row, t);
-			lines.push(
-				exportColumns.map((column) => {
-					if (column.key === "session") return row.title !== undefined ? row.title : t("unknownTitle");
-					if (column.key === "updated") return display.updatedAt;
-					if (row.usage === undefined) return "";
-					if (column.key === "total") return totalOf(row.usage);
-					if (column.key === "input") return row.usage.uncachedInputTokens;
-					if (column.key === "cacheRead") return row.usage.cacheReadTokens;
-					if (column.key === "cacheWrite") return row.usage.cacheWriteTokens;
-					if (column.key === "output") return row.usage.outputTokens;
-					return "";
-				}),
-			);
-		}
-		return lines;
-	}, [columns, filtered, t]);
+	const exportFrom = tableWindow === null ? undefined : tableWindow.fromDay;
+	const exportTo = tableWindow === null ? undefined : tableWindow.toDay;
+	const sessionExportLines = react.useMemo(
+		() => exportSessionLines(flattenAll(nested.roots, nested.childrenOf), exportFrom, exportTo, t),
+		[nested, exportFrom, exportTo, t],
+	);
+	const dayExportLines = react.useMemo(
+		() => exportDayLines(filtered, exportFrom, exportTo, offsetMinutes, t),
+		[filtered, exportFrom, exportTo, offsetMinutes, t],
+	);
+	const modelExportLines = react.useMemo(
+		() => exportModelLines(filtered, exportFrom, exportTo, t),
+		[filtered, exportFrom, exportTo, t],
+	);
 
 	const flagCopied = react.useCallback(() => {
 		setCopied(true);
@@ -364,26 +478,36 @@ function TokenUsagePanel(props) {
 		copyTimer.current = window.setTimeout(() => setCopied(false), 1600);
 	}, [announce, t]);
 
-	const onCopy = react.useCallback(() => {
-		const tsv = exportLines.map((line) => line.join("\t")).join("\n");
-		void Promise.resolve(writeClipboard(tsv)).then(flagCopied, (error) => {
-			console.warn("[dsh-token-usage-panel] clipboard write failed", error);
-			announce(t("copyFailed"));
-		});
-	}, [exportLines, flagCopied, announce, t]);
+	const copyLines = react.useCallback(
+		(lines) => {
+			const tsv = lines.map((line) => line.join("\t")).join("\n");
+			void Promise.resolve(writeClipboard(tsv)).then(flagCopied, (error) => {
+				console.warn("[dsh-token-usage-panel] clipboard write failed", error);
+				announce(t("copyFailed"));
+			});
+		},
+		[flagCopied, announce, t],
+	);
 
-	const onDownload = react.useCallback(() => {
-		const csv = exportLines.map((line) => line.map(csvField).join(",")).join("\r\n");
+	const downloadLines = react.useCallback((lines, kind) => {
+		const csv = lines.map((line) => line.map(csvField).join(",")).join("\r\n");
 		const url = URL.createObjectURL(new Blob(["\ufeff" + csv], { type: "text/csv;charset=utf-8" }));
 		const link = document.createElement("a");
 		const stamp = new Date().toISOString().slice(0, 16).replace(/[:T-]/g, "");
 		link.href = url;
-		link.download = "token-usage-" + stamp + ".csv";
+		link.download = "token-usage" + (kind === "sessions" ? "" : "-" + kind) + "-" + stamp + ".csv";
 		document.body.appendChild(link);
 		link.click();
 		link.remove();
 		URL.revokeObjectURL(url);
-	}, [exportLines]);
+	}, []);
+
+	const onCopy = react.useCallback(() => copyLines(sessionExportLines), [copyLines, sessionExportLines]);
+	const onDownload = react.useCallback(() => downloadLines(sessionExportLines, "sessions"), [downloadLines, sessionExportLines]);
+	const onCopyDays = react.useCallback(() => copyLines(dayExportLines), [copyLines, dayExportLines]);
+	const onDownloadDays = react.useCallback(() => downloadLines(dayExportLines, "days"), [downloadLines, dayExportLines]);
+	const onCopyModels = react.useCallback(() => copyLines(modelExportLines), [copyLines, modelExportLines]);
+	const onDownloadModels = react.useCallback(() => downloadLines(modelExportLines, "models"), [downloadLines, modelExportLines]);
 
 	const onJumpToCurrent = react.useCallback(() => {
 		updateFilters((previous) => ({ ...resetFilters(previous), model: "", view: "sessions" }));
@@ -391,13 +515,21 @@ function TokenUsagePanel(props) {
 	}, [updateFilters, current]);
 
 	const onEmptyAction = react.useCallback(() => {
+		if (emptyKind === "filtered") {
+			updateFilters((previous) => ({ ...previous, query: "", cwd: "", model: "", day: null, topLevelOnly: false, usedOnly: false }));
+			return;
+		}
+		if (emptyKind === "range") {
+			updateFilters((previous) => ({ ...previous, range: "all" }));
+			return;
+		}
 		try {
 			props.startSession();
 		} catch (error) {
 			console.warn("[dsh-token-usage-panel] could not start a session", error);
 			announce(t("startFailed"));
 		}
-	}, [props.startSession, announce, t]);
+	}, [emptyKind, updateFilters, props.startSession, announce, t]);
 
 	const onKeyDown = react.useCallback(
 		(event) => {
@@ -423,20 +555,40 @@ function TokenUsagePanel(props) {
 
 	const loading = pending > 0;
 	const skeleton = phase !== "ready" && rows.length === 0;
+	const hits = react.useMemo(
+		() => (loading ? [] : thresholdHits(rows, thresholds, today)),
+		[loading, rows, thresholds, today],
+	);
+	const thresholdParsed = thresholdsFromDraft(thresholdDraft);
+	const coverageFrom = usageWindow === null ? today - (ROUTE_DAY_RETENTION - 1) : usageWindow.fromDay;
+	const coverageTo = usageWindow === null ? today : usageWindow.toDay;
+	const coverageMissing = react.useMemo(
+		() => routeDayCoverageMissing(rows, coverageFrom, coverageTo),
+		[rows, coverageFrom, coverageTo],
+	);
 
 	// Announce the end of a read, so a refresh or a cold-session backfill is not
 	// silent. Only the falling edge speaks: the rising edge is already conveyed by
 	// the disabled button and the skeleton.
 	const wasLoading = react.useRef(false);
 	react.useEffect(() => {
-		if (wasLoading.current && !loading) announce(t("loaded"));
+		if (wasLoading.current && !loading) {
+			announce(hits.length > 0 ? t("threshold." + hits[0].kind + "Over", { used: formatInt(hits[0].used), limit: formatInt(hits[0].limit), title: hits[0].title ?? "" }) : t("loaded"));
+		}
 		wasLoading.current = loading;
-	}, [loading, announce, t]);
+	}, [loading, announce, t, hits]);
 
 	const header = h("header", { key: "head", className: "dshTup_head" }, [
 		h("div", { key: "main", className: "dshTup_headMain" }, [
 			h("h1", { key: "title", className: "dshTup_title" }, t("title")),
-			h("p", { key: "sub", className: "dshTup_subtitle" }, t("subtitle")),
+			h(SegmentedControl, {
+				key: "range",
+				id: "dsh-tup-range",
+				label: t("range"),
+				value: filters.range,
+				options: HEADER_RANGES.map((value) => ({ value, label: t("range." + value) })),
+				onChange: (next) => updateFilters((previous) => ({ ...previous, range: next })),
+			}),
 		]),
 		h("div", { key: "actions", className: "dshTup_actions" }, [
 			h(SegmentedControl, {
@@ -447,6 +599,15 @@ function TokenUsagePanel(props) {
 				options: VIEWS.map((value) => ({ value, label: t("view." + value) })),
 				onChange: (next) => updateFilters((previous) => ({ ...previous, view: next })),
 			}),
+			h(
+				Button,
+				{
+					key: "thresholds",
+					variant: "outline",
+					onClick: openThresholdEditor,
+				},
+				t("threshold.settings"),
+			),
 			h(
 				Button,
 				{
@@ -461,19 +622,31 @@ function TokenUsagePanel(props) {
 		]),
 	]);
 
-	const filterBar = h(FilterBar, {
-		key: "filters",
-		filters,
-		setFilters: updateFilters,
-		directories,
-		searchRef,
-		exportProps: { onCopy, onDownload, copied, disabled: filtered.length === 0 },
-		onJumpToCurrent,
-		hasCurrent: current !== undefined,
-		modelLabel,
-		dayOffsetMinutes: offsetMinutes,
-		t,
-	});
+	const filterBar = isOverview
+		? null
+		: h(FilterBar, {
+				key: "filters",
+				filters,
+				setFilters: updateFilters,
+				directories,
+				searchRef,
+				exportProps: {
+					onCopy,
+					onDownload,
+					onCopyDays,
+					onDownloadDays,
+					onCopyModels,
+					onDownloadModels,
+					copied,
+					disabled: filtered.length === 0,
+				},
+				onJumpToCurrent,
+				hasCurrent: current !== undefined,
+				onOpenThresholds: openThresholdEditor,
+				modelLabel,
+				dayOffsetMinutes: dayFilterOffset,
+				t,
+			});
 
 	const footer = h("footer", { key: "foot", className: "dshTup_foot" }, [
 		loading ? h("span", { key: "loading" }, t("loading")) : null,
@@ -484,15 +657,29 @@ function TokenUsagePanel(props) {
 					t("pending", { n: unavailable }),
 				])
 			: null,
+		coverageMissing > 0
+			? h("span", { key: "coverage", className: "dshTup_notice" }, [
+					h(IconWarningOutlineRegular, { key: "icon", size: 12 }),
+					t("trend.partial", { n: coverageMissing }),
+				])
+			: null,
 		audit.count > 0
-			? h("span", {
-					key: "audit",
-					className: "dshTup_notice dshTup_audit",
-					title: audit.entries
-						.slice(0, 10)
-						.map((entry) => t("audit.row", { title: entry.title === "" ? entry.id : entry.title, route: formatInt(entry.routeTotal), usage: formatInt(entry.usageTotal) }))
-						.join("\n"),
-				}, [h(IconWarningOutlineRegular, { key: "icon", size: 12 }), t("audit", { n: audit.count })])
+			? h("details", { key: "audit", className: "dshTup_notice dshTup_audit" }, [
+					h("summary", { key: "s" }, [h(IconWarningOutlineRegular, { key: "icon", size: 12 }), t("audit", { n: audit.count })]),
+					h(
+						"ul",
+						{ key: "l", className: "dshTup_auditList" },
+						audit.entries
+							.slice(0, 10)
+							.map((entry) =>
+								h(
+									"li",
+									{ key: entry.id },
+									t("audit.row", { title: entry.title === "" ? entry.id : entry.title, route: formatInt(entry.routeTotal), usage: formatInt(entry.usageTotal) }),
+								),
+							),
+					),
+				])
 			: null,
 		h("span", { key: "spacer", className: "dshTup_footSpacer" }),
 		windowInfo !== null && windowInfo !== undefined
@@ -505,7 +692,7 @@ function TokenUsagePanel(props) {
 				h(Button, { key: "next", variant: "ghost", size: "sm", disabled: currentPage >= pageCount, onClick: () => setPage((value) => Math.min(pageCount, value + 1)), "aria-label": t("page.next") }, t("page.next")),
 			  ])
 			: null,
-		h("span", { key: "count" }, t("card.sessionsHint", { matched: filtered.length, total: rows.length })),
+		isOverview ? null : h("span", { key: "count" }, t("card.sessionsHint", { matched: filtered.length, total: rows.length })),
 	]);
 
 	let body;
@@ -514,11 +701,14 @@ function TokenUsagePanel(props) {
 			h(KpiStrip, {
 				key: "kpi",
 				items: [
-					{ key: "total", label: t("kpi.total"), value: formatCompact(overviewTotal) },
-					{ key: "peak", label: t("kpi.peak"), value: formatCompact(peak) },
-					{ key: "current", label: t("kpi.current"), value: t("kpi.days", { n: streak.current }) },
-					{ key: "longestRun", label: t("kpi.longestRun"), value: t("kpi.days", { n: streak.longest }) },
+					{
+						key: "total",
+						label: t("kpi.total"),
+						value: formatCompact(overviewTotal),
+						title: formatInt(overviewTotal) + " " + t("unit.tokens"),
+					},
 				],
+				compare: compareLabel,
 			}),
 			hasCalendar
 				? h(ActivityHeatmap, {
@@ -527,9 +717,14 @@ function TokenUsagePanel(props) {
 						offsetMinutes,
 						today,
 						t,
+						note: heatNote,
 						onSelectDay,
+						selectedDay: filters.day,
+						anomalies,
+						frame: heatWidth,
+						measureRef: measureHeat,
 					})
-				: h("section", { key: "noCalendar", className: "dshTup_card dshTup_chartCard" }, [
+				: h("section", { key: "noCalendar", className: "dshTup_card dshTup_chartCard dshTup_heatCard" }, [
 						h("h3", { key: "t", className: "dshTup_cardTitle" }, t("activity.title")),
 						h("p", { key: "a", className: "dshTup_chartHint" }, t("chart.empty")),
 						h("p", { key: "b", className: "dshTup_chartHint" }, t("chart.emptyHint")),
@@ -538,21 +733,27 @@ function TokenUsagePanel(props) {
 				? h(TokenTrend, {
 						key: "trend",
 						days: trendDays,
-						series: trend.series,
+						values: trendValues,
+						details: trendHover,
 						offsetMinutes,
 						t,
-						extra: h(SegmentedControl, {
-							id: "dsh-tup-trend",
-							label: t("trend.title"),
-							value: filters.trendDays,
-							options: TREND_RANGES.map((value) => ({ value, label: t("kpi.days", { n: value }) })),
-							onChange: (next) => updateFilters((previous) => ({ ...previous, trendDays: next })),
-						}),
+						extra:
+							coverageMissing > 0
+								? h("span", { className: "dshTup_chartHint" }, t("trend.partial", { n: coverageMissing }))
+								: null,
 					})
 				: null,
 			breakdown === undefined
 				? null
-				: h(ModelDonut, { key: "donut", routes: breakdown.routes, t, onSelect: onSelectModel, extra: null }),
+				: h(ModelDonut, {
+						key: "models",
+						routes: breakdown.routes,
+						t,
+						onSelect: onSelectModel,
+						extra: null,
+						expanded: modelsExpanded,
+						onToggleExpanded: toggleModels,
+					}),
 		]);
 	} else {
 		body = h("div", { key: "sessions", className: "dshTup_sessions" }, [
@@ -564,10 +765,10 @@ function TokenUsagePanel(props) {
 				total: rows.length,
 				grandTotal,
 				filteredOut,
+				showGrand: filters.range !== "all",
 				animate,
 				t,
 			}),
-			h(ModelBreakdown, { key: "models", breakdown, onSelect: onSelectModel, t }),
 			h(UsageTable, {
 				key: "table",
 				rows: paged,
@@ -582,9 +783,13 @@ function TokenUsagePanel(props) {
 				onWindowChange,
 				onOpen: openSession,
 				onRetry: retry,
+				onToggleExpand: toggleExpand,
 				onEmptyAction,
+				emptyKind,
 				skeleton,
 				currentId: current === undefined ? undefined : current.id,
+				fromDay: tableWindow === null ? undefined : tableWindow.fromDay,
+				toDay: tableWindow === null ? undefined : tableWindow.toDay,
 				t,
 			}),
 		]);
@@ -617,6 +822,19 @@ function TokenUsagePanel(props) {
 			h("div", { key: "status", className: "dshTup_live", role: "status", "aria-live": "polite", "aria-atomic": "true" }, status),
 			header,
 			filterBar,
+			hits.length > 0
+				? h("div", { key: "alerts", className: "dshTup_notice dshTup_alerts", role: "status" }, [
+						h(IconWarningOutlineRegular, { key: "icon", size: 12 }),
+						h(
+							"ul",
+							{ key: "list", className: "dshTup_alertList" },
+							hits.map((hit) =>
+								h("li", { key: hit.kind }, t("threshold." + hit.kind + "Over", { used: formatInt(hit.used), limit: formatInt(hit.limit), title: hit.title ?? "" })),
+							),
+						),
+						h(Button, { key: "set", variant: "ghost", size: "sm", onClick: openThresholdEditor }, t("threshold.settings")),
+					])
+				: null,
 			body,
 			footer,
 			// The archived-session notice: the answer to the click the reader just made,
@@ -631,6 +849,54 @@ function TokenUsagePanel(props) {
 				description: t("archivedBody"),
 				footer: h(Button, { variant: "primary", onClick: onArchivedClosed }, t("archivedClose")),
 			}),
+			h(
+				Modal,
+				{
+					key: "thresholds",
+					open: thresholdOpen,
+					onClose: closeThresholdEditor,
+					title: t("threshold.settings"),
+					closeLabel: t("threshold.cancel"),
+					description: t("threshold.hint"),
+					footer: [
+						h(Button, { key: "c", variant: "outline", onClick: closeThresholdEditor }, t("threshold.cancel")),
+						h(Button, { key: "s", variant: "primary", onClick: applyThresholdDraft }, t("threshold.save")),
+					],
+				},
+				h("div", { className: "dshTup_thresholdForm" }, [
+					h("label", { key: "day", className: "dshTup_thresholdField" }, [
+						h("span", { key: "l" }, t("threshold.day")),
+						h(Input, {
+							key: "i",
+							"aria-label": t("threshold.day"),
+							value: thresholdDraft.day,
+							inputMode: "numeric",
+							onChange: (event) => setThresholdDraft((previous) => ({ ...previous, day: event.target.value })),
+						}),
+					]),
+					h("label", { key: "week", className: "dshTup_thresholdField" }, [
+						h("span", { key: "l" }, t("threshold.week")),
+						h(Input, {
+							key: "i",
+							"aria-label": t("threshold.week"),
+							value: thresholdDraft.week,
+							inputMode: "numeric",
+							onChange: (event) => setThresholdDraft((previous) => ({ ...previous, week: event.target.value })),
+						}),
+					]),
+					h("label", { key: "session", className: "dshTup_thresholdField" }, [
+						h("span", { key: "l" }, t("threshold.session")),
+						h(Input, {
+							key: "i",
+							"aria-label": t("threshold.session"),
+							value: thresholdDraft.session,
+							inputMode: "numeric",
+							onChange: (event) => setThresholdDraft((previous) => ({ ...previous, session: event.target.value })),
+						}),
+					]),
+					thresholdParsed === undefined ? h("p", { key: "invalid", className: "dshTup_notice" }, t("threshold.invalid")) : null,
+				]),
+			),
 		],
 	);
 }

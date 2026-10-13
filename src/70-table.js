@@ -10,6 +10,12 @@
 const ROW_HEIGHT = 54;
 /** Scroll offset remembered across panel unmount/remount (one panel instance). */
 const SCROLL_MEMORY = { top: 0 };
+/** Empty-state copy per cause: title, hint, action label. */
+const EMPTY_COPY = {
+	filtered: ["emptyFiltered", "emptyFilteredHint", "emptyClear"],
+	range: ["emptyRange", "emptyRangeHint", "emptyAll"],
+	none: ["empty", "emptyHint", "emptyAction"],
+};
 
 /**
  * The rows to render for the current scroll offset.
@@ -45,11 +51,34 @@ function SpacerRow({ height, columns, position }) {
  * @returns the cell element.
  */
 function usageCell(column, context) {
-	const { row, display, share, filteredTotal, currentId, onRetry, t } = context;
+	const { row, display, share, filteredTotal, currentId, onRetry, onToggleExpand, childCount, expanded, familyTotal, depth, t } = context;
 	const hideBelow = column.hideClass;
 	if (column.key === "session") {
 		return h("td", { key: "session", className: cx("dshTup_colSession", hideBelow) }, [
-			h("div", { key: "main", className: "dshTup_cellMain" }, [
+			childCount > 0
+				? h(
+						"button",
+						{
+							key: "tree",
+							type: "button",
+							className: "dshTup_treeToggle dshTup_treeToggleRail",
+							"aria-expanded": expanded === true,
+							"aria-label": expanded === true ? t("tree.collapse") : t("tree.expand"),
+							onClick: (event) => {
+								event.stopPropagation();
+								onToggleExpand(row.id);
+							},
+							onKeyDown: (event) => {
+								if (event.key !== "Enter" && event.key !== " ") return;
+								event.stopPropagation();
+								event.preventDefault();
+								onToggleExpand(row.id);
+							},
+						},
+						h(IconChevronDownOutlineRegular, { size: 14, className: "dshTup_chevron" }),
+					)
+				: null,
+			h("div", { key: "main", className: cx("dshTup_cellMain", "dshTup_treePad", childCount > 0 && "dshTup_treeHasChildren"), "data-depth": depth ?? 1 }, [
 				h("div", { key: "title", className: "dshTup_rowTitle" }, [
 					row.running ? h(StateDot, { key: "run", state: "ongoing", "aria-hidden": "true" }) : null,
 					h("span", { key: "text", className: "dshTup_rowTitleText" }, row.title !== undefined ? row.title : t("unknownTitle")),
@@ -57,7 +86,14 @@ function usageCell(column, context) {
 					row.id === currentId ? h(Tag, { key: "cur" }, t("badge.current")) : null,
 				]),
 				h("div", { key: "meta", className: "dshTup_rowMeta" }, [
-					display.meta,
+					display.directory === undefined ? null : h("span", { key: "directory", className: "dshTup_rowMetaPart" }, display.directory),
+					display.turns === undefined ? null : h("span", { key: "turns", className: "dshTup_rowMetaPart dshTup_rowMetaOptional" }, display.turns),
+					display.status === undefined ? null : h("span", { key: "status", className: "dshTup_rowMetaPart" }, display.status),
+					h("span", { key: "cache", className: "dshTup_rowMetaPart dshTup_rowMetaOptional" }, t("efficiency.cacheReadShort", { rate: display.cacheReadRate })),
+					childCount > 0 ? h("span", { key: "children", className: "dshTup_rowFamily" }, t("tree.children", { n: childCount })) : null,
+					childCount > 0 && familyTotal !== undefined
+						? h("span", { key: "family", className: "dshTup_rowFamily" }, t("tree.family", { n: formatInt(familyTotal) }))
+						: null,
 					row.attempt === "error"
 						? h(
 								"button",
@@ -105,16 +141,37 @@ function usageCell(column, context) {
  * total, and handlers.
  * @returns the table row.
  */
-function UsageRow({ row, index, display, share, filteredTotal, columns, currentId, onOpen, onRetry, t }) {
+function UsageRow({
+	row,
+	index,
+	display,
+	share,
+	filteredTotal,
+	columns,
+	currentId,
+	onOpen,
+	onRetry,
+	onToggleExpand,
+	depth,
+	childCount,
+	expanded,
+	familyTotal,
+	t,
+}) {
 	const activate = () => onOpen(row.id);
+	const level = depth === undefined ? 1 : depth;
 	return h(
 		"tr",
 		{
 			className: cx("dshTup_row", row.id === currentId && "dshTup_rowCurrent"),
 			"data-row": row.id,
+			"aria-level": level,
 			// The index only feeds the entrance wave: CSS multiplies it by the shared
 			// stagger token, so a page of rows lands as a sweep instead of a jump.
-			style: { "--dsh-tup-i": index },
+			style: {
+				"--dsh-tup-i": index,
+				"--dsh-tup-tree-d": Math.min(Math.max(level - 1, 0), TREE_INDENT_CAP),
+			},
 			tabIndex: 0,
 			"aria-label": t("open", { title: row.title !== undefined ? row.title : t("unknownTitle") }),
 			title: display.tooltip,
@@ -125,7 +182,22 @@ function UsageRow({ row, index, display, share, filteredTotal, columns, currentI
 				activate();
 			},
 		},
-		columns.map((column) => usageCell(column, { row, display, share, filteredTotal, currentId, onRetry, t })),
+		columns.map((column) =>
+			usageCell(column, {
+				row,
+				display,
+				share,
+				filteredTotal,
+				currentId,
+				onRetry,
+				onToggleExpand,
+				childCount: childCount ?? 0,
+				expanded,
+				familyTotal,
+				depth,
+				t,
+			}),
+		),
 	);
 }
 
@@ -168,9 +240,13 @@ function UsageTable({
 	onWindowChange,
 	onOpen,
 	onRetry,
+	onToggleExpand,
 	onEmptyAction,
+	emptyKind,
 	skeleton,
 	currentId,
+	fromDay,
+	toDay,
 	t,
 }) {
 	const scrollRef = react.useRef(null);
@@ -188,7 +264,7 @@ function UsageTable({
 	react.useLayoutEffect(() => {
 		if (focusId === undefined) return;
 		const element = scrollRef.current;
-		const index = rows.findIndex((row) => row.id === focusId);
+		const index = rows.findIndex((node) => node.row.id === focusId);
 		if (element !== null && element !== undefined && index >= 0) {
 			element.scrollTop = Math.max(0, index * rowHeight - rowHeight * 2);
 			SCROLL_MEMORY.top = element.scrollTop;
@@ -221,11 +297,12 @@ function UsageTable({
 	if (skeleton) {
 		body = h(SkeletonRows, { key: "skeleton", count: 6, t });
 	} else if (rows.length === 0) {
+		const [titleKey, hintKey, actionKey] = EMPTY_COPY[emptyKind] ?? EMPTY_COPY.none;
 		body = h("div", { key: "empty", className: "dshTup_empty" }, [
 			h(IconDatabaseOutlineRegular, { key: "icon", size: 28, className: "dshTup_emptyIcon" }),
-			h("div", { key: "a" }, t("empty")),
-			h("div", { key: "b", className: "dshTup_subtitle" }, t("emptyHint")),
-			h(Button, { key: "c", variant: "outline", onClick: onEmptyAction }, t("emptyAction")),
+			h("div", { key: "a" }, t(titleKey)),
+			h("div", { key: "b", className: "dshTup_subtitle" }, t(hintKey)),
+			h(Button, { key: "c", variant: "outline", onClick: onEmptyAction }, t(actionKey)),
 		]);
 	} else {
 		const head = h(
@@ -246,7 +323,7 @@ function UsageTable({
 			"colgroup",
 			{ key: "cols" },
 			columns.map((column) =>
-				h("col", { key: column.key, className: column.colHideClass, style: { width: column.width + "px" } }),
+				h("col", { key: column.key, className: column.colHideClass, style: { width: column.fluid ? undefined : column.width + "px" } }),
 			),
 		);
 		body = h("table", { key: "t", className: "dshTup_table" }, [cols, head, h("tbody", { key: "body" }, bodyRows())]);
@@ -257,20 +334,27 @@ function UsageTable({
 		const out = [];
 		if (range.topPad > 0) out.push(h(SpacerRow, { key: "top", height: range.topPad, columns: columns.length, position: "top" }));
 		for (let index = 0; index < slice.length; index += 1) {
-			const row = slice[index];
-			const display = displayOf(row, t);
+			const node = slice[index];
+			const row = node.row;
+			const usage = fromDay === null || fromDay === undefined ? row.usage : usageInWindow(row, fromDay, toDay);
+			const display = displayOf(row, t, usage === row.usage ? undefined : usage);
 			out.push(
 				h(UsageRow, {
 					key: row.id,
 					index,
 					row,
 					display,
-					share: row.usage === undefined ? 0 : totalOf(row.usage),
+					share: usage === undefined ? 0 : totalOf(usage),
 					filteredTotal,
 					columns,
 					currentId,
 					onOpen,
 					onRetry,
+					onToggleExpand,
+					depth: node.depth,
+					childCount: node.childCount,
+					expanded: node.expanded,
+					familyTotal: node.familyTotal,
 					t,
 				}),
 			);

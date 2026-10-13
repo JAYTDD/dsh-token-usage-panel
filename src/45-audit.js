@@ -10,7 +10,7 @@
  * user eyeballed it.
  *
  * `tokenUsageByRoute` is UNwindowed (unlike `ByDay` / `ByRouteByDay`, which clip
- * to 366 / 31 days and therefore legitimately sum to LESS than the total). So for
+ * to 366 / 90 days and therefore legitimately sum to LESS than the total). So for
  * any row that carries both values, the four buckets summed across routes MUST
  * equal the row's total exactly — the same identity the Host differential oracle
  * enforces at fold time, re-checked here at render against whatever
