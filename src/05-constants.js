@@ -21,6 +21,11 @@ const THRESHOLD_KEY = "dsh-token-usage-panel.thresholds.v1";
  * Keys reset when the Host day index changes, so one crossing beeps once.
  */
 const NOTIFIED_KEY = "dsh-token-usage-panel.notified.v1";
+/**
+ * Panel palette persistence. Kept off the filters blob so resetting filters
+ * cannot clear a look the reader chose.
+ */
+const THEME_KEY = "dsh-token-usage-panel.theme.v1";
 /** Days of `tokenUsageByRouteByDay` the Host retains; the client uses this to detect coverage gaps. */
 const ROUTE_DAY_RETENTION = 90;
 /** Cap on named filter views stored beside the live filters. */

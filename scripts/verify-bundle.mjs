@@ -35,6 +35,7 @@ const bundlePath = join(root, 'lib', 'client.js')
 const FILTER_KEY = 'dsh-token-usage-panel.filters.v3'
 const THRESHOLD_KEY = 'dsh-token-usage-panel.thresholds.v1'
 const NOTIFIED_KEY = 'dsh-token-usage-panel.notified.v1'
+const THEME_KEY = 'dsh-token-usage-panel.theme.v1'
 const LEGACY_KEYS = ['dsh-token-usage-panel.filters.v1', 'dsh-token-usage-panel.filters.v2']
 const DAY = 86400000
 
@@ -2229,6 +2230,160 @@ console.log('# system threshold notifications')
   listStore.push(listStore.getSnapshot())
   sandbox.Notification = undefined
   sandbox.window.Notification = undefined
+}
+
+console.log('# panel palettes')
+{
+  const NAMED = [...new Set([...css.matchAll(/\.dshTup_root\[data-palette="([^"]+)"\]/g)].map((match) => match[1]))]
+  const localeZh = registeredLocales.tokenUsage?.zh ?? {}
+  const localeEn = registeredLocales.tokenUsage?.en ?? {}
+  const keys = [
+    'theme',
+    'theme.short',
+    'theme.group.system',
+    'theme.group.looks',
+    'theme.system',
+    ...NAMED.map((id) => 'theme.' + id),
+  ]
+  check(NAMED.length === 6, 'the panel ships six element palettes (' + NAMED.length + ')')
+  check(
+    !NAMED.some((id) => /tokyo|catppuccin|dracula|flexoki|gruvbox|nord|rose|solarized|kanagawa|monokai|everforest|synthwave|vesper|onedark|ayu|cobalt|github|material|nightowl|palenight|zenburn|carbonfox|mercury|vercel|amoled|aura|shadesofpurple|lucent|osaka|orng|opencode|oc-2/.test(id)),
+    'the catalogue is original, not a port of another plugin',
+  )
+  check(
+    keys.every((key) => typeof localeZh[key] === 'string' && typeof localeEn[key] === 'string'),
+    'palette strings exist in both dictionaries',
+  )
+  check(
+    keys.every((key) => !localeZh[key].includes('$') && !localeEn[key].includes('$')),
+    'palette copy names looks, not money',
+  )
+  check(source.includes(THEME_KEY), 'palettes persist under their own v1 key, not filters.v3')
+  check(!css.includes('.dshTup_root[data-palette="system"]'), 'system does not override host aliases')
+  check(
+    NAMED.every(
+      (id) =>
+        css.includes('body[data-ds-dark-theme] .dshTup_root[data-palette="' + id + '"]') &&
+        css.includes('body:not([data-ds-dark-theme]) .dshTup_root[data-palette="' + id + '"]'),
+    ),
+    'every named palette has dark and light CSS (' + NAMED.length + ')',
+  )
+  check(
+    css.includes('var(--dsh-tup-heading') &&
+      css.includes('var(--dsh-tup-number') &&
+      css.includes('var(--dsh-tup-name') &&
+      css.includes('var(--dsh-tup-comment') &&
+      css.includes('var(--dsh-tup-tag-bg'),
+    'titles, numbers, names, comments and tag fills take panel roles',
+  )
+
+  const luminance = (hex) => {
+    const raw = hex.replace('#', '')
+    const full = raw.length === 3 ? raw.split('').map((part) => part + part).join('') : raw
+    const channels = [0, 2, 4].map((offset) => parseInt(full.slice(offset, offset + 2), 16) / 255)
+    const linear = channels.map((value) => (value <= 0.03928 ? value / 12.92 : ((value + 0.055) / 1.055) ** 2.4))
+    return 0.2126 * linear[0] + 0.7152 * linear[1] + 0.0722 * linear[2]
+  }
+  const ratio = (a, b) => {
+    const [high, low] = [luminance(a), luminance(b)].sort((left, right) => right - left)
+    return (high + 0.05) / (low + 0.05)
+  }
+  const declarationsOf = (selector) => {
+    const start = css.indexOf(selector + '{')
+    if (start === -1) return ''
+    return css.slice(start + selector.length + 1, css.indexOf('}', start))
+  }
+  const valueOf = (block, name) => {
+    const match = new RegExp('--' + name + ':([^;]+)').exec(block)
+    return match === null ? null : match[1]
+  }
+  const solidHex = (value) => typeof value === 'string' && /^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/.test(value)
+  const HOST = { dark: '#141414', light: '#ffffff' }
+  const ROLES = [
+    'dsh-tup-heading',
+    'dsh-tup-number',
+    'dsh-tup-name',
+    'dsh-tup-tag',
+    'dsh-tup-comment',
+    'dsw-alias-state-warn-primary',
+    'dsw-alias-state-success-primary',
+    'dsw-alias-state-business-primary',
+  ]
+  const CHROME = ['dsw-alias-bg-base', 'dsw-alias-bg-layer-1', 'dsw-alias-bg-layer-2', 'dsw-alias-border-l1', 'dsw-alias-label-primary']
+  for (const id of NAMED) {
+    for (const [mode, prefix] of [
+      ['dark', 'body[data-ds-dark-theme] '],
+      ['light', 'body:not([data-ds-dark-theme]) '],
+    ]) {
+      const block = declarationsOf(prefix + '.dshTup_root[data-palette="' + id + '"]')
+      check(
+        CHROME.every((name) => valueOf(block, name) === null),
+        id + ' ' + mode + ' leaves host surfaces, borders and body type alone',
+      )
+      const heading = valueOf(block, 'dsh-tup-heading')
+      const number = valueOf(block, 'dsh-tup-number')
+      const name = valueOf(block, 'dsh-tup-name')
+      const tag = valueOf(block, 'dsh-tup-tag')
+      check(
+        heading !== number && number !== name && name !== tag && heading !== name,
+        id + ' ' + mode + ' uses different hues for heading, number, model name and tag',
+      )
+      const hover = valueOf(block, 'dsw-alias-interactive-bg-hover')
+      check(
+        typeof hover === 'string' && hover.startsWith('rgba('),
+        id + ' ' + mode + ' tints hover from the accent instead of painting a surface',
+      )
+      check(
+        valueOf(block, 'dsw-alias-state-success-primary') !== null &&
+          valueOf(block, 'dsw-alias-state-warn-primary') !== null &&
+          valueOf(block, 'dsw-alias-state-business-primary') !== null,
+        id + ' ' + mode + ' colours composition states inside the panel',
+      )
+      for (const role of ROLES) {
+        const color = valueOf(block, role)
+        if (!solidHex(color)) continue
+        check(
+          ratio(color, HOST[mode]) >= 4.5,
+          id + ' ' + mode + ' ' + role + ' clears AA on the host surface (' + ratio(color, HOST[mode]).toFixed(2) + ':1)',
+        )
+      }
+    }
+  }
+
+  await reset()
+  runtime.restart()
+  stored.delete(THEME_KEY)
+  render()
+  await settle()
+  check(rootNode().props['data-palette'] === 'system', 'the panel follows the host palette by default')
+
+  stored.set(THEME_KEY, '"nope"')
+  runtime.restart()
+  render()
+  await settle()
+  check(rootNode().props['data-palette'] === 'system', 'an unknown palette id falls back to system')
+
+  stored.set(THEME_KEY, '{')
+  runtime.restart()
+  render()
+  await settle()
+  check(rootNode().props['data-palette'] === 'system', 'corrupt palette JSON falls back to system')
+
+  stored.set(THEME_KEY, '"tokyonight"')
+  runtime.restart()
+  render()
+  await settle()
+  check(rootNode().props['data-palette'] === 'system', 'a leftover third-party palette id falls back to system')
+
+  check(await tryPickMenu('theme', 'theme.graphite'), 'the header offers a Graphite palette')
+  check(rootNode().props['data-palette'] === 'graphite', 'selecting Graphite writes data-palette')
+  check(JSON.parse(stored.get(THEME_KEY) ?? 'null') === 'graphite', 'the chosen palette is persisted')
+  await reset()
+  check(JSON.parse(stored.get(THEME_KEY) ?? 'null') === 'graphite', 'resetting filters keeps the palette')
+  stored.delete(THEME_KEY)
+  runtime.restart()
+  render()
+  await settle()
 }
 
 console.log('# 90-day route-by-day coverage')

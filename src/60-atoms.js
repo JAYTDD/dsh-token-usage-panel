@@ -113,6 +113,54 @@ function FilterRow({ children }) {
 	return h("div", { className: "dshTup_filterRow" }, children);
 }
 
+/**
+ * Header menu that switches the panel's element palette. Surfaces stay on the
+ * host; type roles, series, composition states and hover wash move. Open state
+ * lives on the panel so this stays hook-free (the self-check's cursor cannot
+ * absorb a child hook).
+ */
+function ThemeMenu({ theme, onSelect, open, setOpen, t }) {
+	const items = [];
+	const selectedIds = [theme];
+	let lastGroup;
+	for (const entry of PALETTES) {
+		if (entry.group !== lastGroup) {
+			lastGroup = entry.group;
+			items.push({ id: "sep:" + entry.group, type: "separator" });
+			items.push({ id: "label:" + entry.group, type: "label", text: t("theme.group." + entry.group) });
+		}
+		items.push({ id: entry.id, label: t("theme." + entry.id) });
+	}
+	const menuOpen = open === true;
+	return h(Menu, {
+		open: menuOpen,
+		className: "dshTup_menu",
+		items,
+		selectedIds,
+		onSelect: (id) => {
+			if (paletteOf(id) !== undefined) onSelect(id);
+			setOpen(false);
+		},
+		onClose: () => setOpen(false),
+		portal: true,
+		anchor: h(
+			Button,
+			{
+				variant: "outline",
+				className: "dshTup_themeBtn",
+				"aria-label": t("theme"),
+				"aria-haspopup": "menu",
+				"aria-expanded": menuOpen,
+				onClick: () => setOpen((previous) => previous !== true),
+			},
+			[
+				h("span", { key: "l", className: "dshTup_triggerLabel" }, t("theme.short")),
+				h(IconChevronDownOutlineRegular, { key: "c", size: 14, className: cx("dshTup_chevron", menuOpen && "dshTup_chevronOpen") }),
+			],
+		),
+	});
+}
+
 /** A dismissable chip for one active filter. */
 function FilterChip({ chipKey, label, title, onClear }) {
 	return h(

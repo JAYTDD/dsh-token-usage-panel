@@ -81,7 +81,7 @@ config:
 
 顶栏的时间范围不再按会话「最近活动」筛表：`7 天` / `30 天` 只保留窗口内 `dayUsage` 有用量的会话（与点年历某一天同一条规则）。已存的 `range: "today"` 会改写成 `7d`。
 
-筛选条件连同视图、列宽、构成列开关一起存在 `localStorage["dsh-token-usage-panel.filters.v3"]`——损坏、类型错误、越界或旧版本的值都会被字段级校验后回退默认。用量阈值单独存在 `localStorage["dsh-token-usage-panel.thresholds.v1"]`，重置筛选不会清掉它。
+筛选条件连同视图、列宽、构成列开关一起存在 `localStorage["dsh-token-usage-panel.filters.v3"]`——损坏、类型错误、越界或旧版本的值都会被字段级校验后回退默认。用量阈值单独存在 `localStorage["dsh-token-usage-panel.thresholds.v1"]`，面板外观单独存在 `localStorage["dsh-token-usage-panel.theme.v1"]`，重置筛选不会清掉它们。
 
 ### 快捷键
 
@@ -99,7 +99,7 @@ config:
 
 ### 主题与无障碍
 
-浅色是默认主题，深色跟随平台属性自动切换。面板自身有一个 live region，正在读取/读取完成/失败都会朗读；热力图的可点日期是可聚焦的按钮角色（`role="button"` + `tabIndex`，Enter/Space 激活）并带日期名字，表头排序按钮移出了 Tab 序列（键盘入口是排序菜单）；所有动画都遵守 `prefers-reduced-motion`。
+默认跟随 DSH 的浅色 / 深色。面板背景、边框、正文始终用宿主色。顶栏「外观」只换本插件内的元素色彩（石墨、青釉、夜航、朱砂、琥珀、砚台）：标题、数字、模型名、网关标签、提示字、构成条、悬停与图表系列各走各的角色色，侧栏和聊天区仍走平台主题。面板自身有一个 live region，正在读取/读取完成/失败都会朗读；热力图的可点日期是可聚焦的按钮角色（`role="button"` + `tabIndex`，Enter/Space 激活）并带日期名字，表头排序按钮移出了 Tab 序列（键盘入口是排序菜单）；所有动画都遵守 `prefers-reduced-motion`。
 
 ## 数据来源与口径
 
@@ -168,7 +168,7 @@ lib/index.js              Host 入口：注册三个单元 + 名称缓存刷新
 lib/route-usage.js        Host 折叠：共用推进步骤、三个单元、窗口裁剪
 lib/route-names.js        Host 名称缓存：网关名 + 模型显示名（无厂商）
 lib/client.js             浏览器产物（生成物，勿手改）
-src/00-boot.js … 99-apply.js    浏览器半场源码，共 17 个模块
+src/00-boot.js … 99-apply.js    浏览器半场源码，共 18 个模块
 scripts/build.mjs         零依赖生成器（--check 是过期闸门）
 ```
 

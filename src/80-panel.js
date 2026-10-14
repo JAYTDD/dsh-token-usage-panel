@@ -41,6 +41,8 @@ function TokenUsagePanel(props) {
 	const [thresholds, setThresholds] = react.useState(loadThresholds);
 	const [thresholdOpen, setThresholdOpen] = react.useState(false);
 	const [thresholdDraft, setThresholdDraft] = react.useState(() => draftOfThresholds(loadThresholds()));
+	const [theme, setTheme] = react.useState(loadTheme);
+	const [themeOpen, setThemeOpen] = react.useState(false);
 	const toggleExpand = react.useCallback((id) => {
 		setExpandedIds((previous) => {
 			const next = new Set(previous);
@@ -105,6 +107,10 @@ function TokenUsagePanel(props) {
 	react.useEffect(() => {
 		saveThresholds(thresholds);
 	}, [thresholds]);
+
+	react.useEffect(() => {
+		saveTheme(theme);
+	}, [theme]);
 
 	react.useEffect(
 		() => () => {
@@ -602,6 +608,7 @@ function TokenUsagePanel(props) {
 				options: VIEWS.map((value) => ({ value, label: t("view." + value) })),
 				onChange: (next) => updateFilters((previous) => ({ ...previous, view: next })),
 			}),
+			h(ThemeMenu, { key: "theme", theme, onSelect: setTheme, open: themeOpen, setOpen: setThemeOpen, t }),
 			h(
 				Button,
 				{
@@ -806,6 +813,7 @@ function TokenUsagePanel(props) {
 			className: "dshTup_root",
 			"data-token-usage-panel": true,
 			"data-view": filters.view,
+			"data-palette": theme,
 			// Motion is always on. The attribute is the stylesheet's scope for every
 			// entrance, growth and interaction rule, so it is also how a host embedding
 			// this panel could turn the vocabulary off.

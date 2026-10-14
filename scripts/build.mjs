@@ -39,6 +39,7 @@ export const MODULES = [
   '20-usage.js',
   '30-filters.js',
   '32-thresholds.js',
+  '34-themes.js',
   '40-data.js',
   '41-threshold-watch.js',
   '42-tree.js',
